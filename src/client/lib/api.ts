@@ -61,7 +61,7 @@ export async function trackAnalyticsEvent(input: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
-  });
+  }).catch(() => undefined);
 }
 
 export async function fetchProducts(filters: ProductFilters = {}): Promise<Product[]> {
@@ -75,14 +75,83 @@ export async function fetchProducts(filters: ProductFilters = {}): Promise<Produ
   if (filters.tags?.length) params.set("tags", filters.tags.join(","));
 
   const query = params.toString();
-  const response = await fetch(`${apiBase}/api/products${query ? `?${query}` : ""}`);
+
+  try {
+    const response = await fetch(`${apiBase}/api/products${query ? `?${query}` : ""}`);
+
+    if (!response.ok) {
+      throw new Error(await buildApiErrorMessage(response, "Product request failed"));
+    }
+
+    const body = (await response.json()) as { products: Product[] };
+    return body.products;
+  } catch (error) {
+    console.warn(error instanceof Error ? error.message : "Product API unavailable; using static catalog fallback");
+    return fetchStaticProducts(filters);
+  }
+}
+
+async function fetchStaticProducts(filters: ProductFilters) {
+  const response = await fetch("/catalog/products.json", { cache: "no-store" });
 
   if (!response.ok) {
-    throw new Error(await buildApiErrorMessage(response, "Product request failed"));
+    throw new Error(await buildApiErrorMessage(response, "Static product catalog request failed"));
   }
 
-  const body = (await response.json()) as { products: Product[] };
-  return body.products;
+  const products = (await response.json()) as Product[];
+  return filterProducts(products, filters);
+}
+
+function filterProducts(catalog: Product[], filters: ProductFilters) {
+  const query = normalize(filters.query ?? "");
+  const tags = (filters.tags ?? []).map(normalize);
+  const category = normalize(filters.category ?? "");
+  const limit = filters.limit ?? catalog.length;
+  const strictBudget = filters.strictBudget ?? true;
+  const hasFilters = Boolean(query || category || filters.maxPrice || tags.length);
+
+  if (!hasFilters) return catalog.slice(0, limit);
+
+  return catalog
+    .map((product) => {
+      const searchable = normalize(
+        [
+          product.name,
+          product.category,
+          product.description,
+          product.tags.join(" "),
+          product.benefits.join(" "),
+          product.materials.join(" ")
+        ].join(" ")
+      );
+      let score = 0;
+
+      if (query && searchable.includes(query)) score += 4;
+
+      for (const token of query.split(/\s+/).filter(Boolean)) {
+        if (searchable.includes(token)) score += 1;
+      }
+
+      if (category && normalize(product.category).includes(category)) score += 3;
+      if (filters.maxPrice && product.price <= filters.maxPrice) score += 2;
+      if (filters.maxPrice && !strictBudget && product.price > filters.maxPrice && product.price <= filters.maxPrice + 35) {
+        score += 1;
+      }
+
+      for (const tag of tags) {
+        if (product.tags.map(normalize).some((productTag) => productTag.includes(tag))) score += 2;
+      }
+
+      return { product, score };
+    })
+    .filter(({ product, score }) => score > 0 && (!filters.maxPrice || !strictBudget || product.price <= filters.maxPrice))
+    .sort((a, b) => b.score - a.score || b.product.rating - a.product.rating)
+    .slice(0, limit)
+    .map(({ product }) => product);
+}
+
+function normalize(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 async function buildApiErrorMessage(response: Response, fallback: string) {
