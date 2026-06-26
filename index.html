@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Brand Experience Agent</title>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      window.gtag =
+        window.gtag ||
+        function gtag() {
+          window.dataLayer.push(arguments);
+        };
+
+      (function loadGoogleAnalyticsTag() {
+        var measurementId = "%VITE_GA4_MEASUREMENT_ID%".trim();
+        if (!measurementId || measurementId.charAt(0) === "%") return;
+        if (document.getElementById("ga4-gtag-script")) return;
+
+        var script = document.createElement("script");
+        script.id = "ga4-gtag-script";
+        script.async = true;
+        script.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(measurementId);
+        script.onload = function () {
+          script.dataset.loaded = "true";
+        };
+        script.onerror = function () {
+          script.dataset.loaded = "false";
+        };
+        document.head.appendChild(script);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/client/main.tsx"></script>
+  </body>
+</html>

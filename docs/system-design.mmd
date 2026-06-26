@@ -1,0 +1,13 @@
+flowchart LR
+  Customer["Customer"] --> Client["React frontend"]
+  Client --> Api["Node.js TypeScript API"]
+  Api --> Agent["Brand Experience Agent"]
+  Agent --> OpenAI["OpenAI Responses API"]
+  OpenAI --> Search["file_search"]
+  Search --> Store["Vector store"]
+  Agent --> Functions["Function calling framework"]
+  Functions --> Catalog["Product catalog"]
+  Functions --> Orders["Orders, inventory, checkout"]
+  Functions --> CRM["CRM and loyalty"]
+  Api --> DB["PostgreSQL"]
+  DB --> Dashboard["Analytics dashboard"]

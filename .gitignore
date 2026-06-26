@@ -1,0 +1,14 @@
+node_modules
+dist
+build
+.env
+.env.local
+.vercel
+.DS_Store
+coverage
+*.log
+tmp
+aipersonaltourguide-*.json
+*service-account*.json
+*.pem
+*.key
