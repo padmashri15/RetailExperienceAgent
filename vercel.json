@@ -4,7 +4,7 @@
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist/client",
   "functions": {
-    "api/[...path].ts": {
+    "api/**/*.ts": {
       "includeFiles": "data/**",
       "maxDuration": 60
     }
@@ -13,10 +13,6 @@
     {
       "source": "/health",
       "destination": "/api/health"
-    },
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/$1"
     },
     {
       "source": "/(.*)",
