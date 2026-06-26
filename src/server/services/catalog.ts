@@ -1,6 +1,5 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import type { Product } from "../../shared/types";
+import catalogData from "../../../data/catalog/products.json";
 
 let catalogCache: Product[] | undefined;
 
@@ -9,9 +8,7 @@ export async function loadCatalog(): Promise<Product[]> {
     return catalogCache;
   }
 
-  const catalogPath = path.resolve(process.cwd(), "data/catalog/products.json");
-  const raw = await readFile(catalogPath, "utf-8");
-  catalogCache = JSON.parse(raw) as Product[];
+  catalogCache = (catalogData as Product[]).map((product) => ({ ...product }));
   return catalogCache;
 }
 

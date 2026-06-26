@@ -4,7 +4,7 @@
   "buildCommand": "npm run vercel-build",
   "outputDirectory": "dist/client",
   "functions": {
-    "api/**/*.ts": {
+    "api/[...path].ts": {
       "includeFiles": "data/**",
       "maxDuration": 60
     }
