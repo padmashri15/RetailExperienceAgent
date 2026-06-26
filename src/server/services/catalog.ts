@@ -1,5 +1,8 @@
+import { createRequire } from "node:module";
 import type { Product } from "../../shared/types";
-import catalogData from "../../../data/catalog/products.json";
+
+const require = createRequire(import.meta.url);
+const catalogData = require("../../../data/catalog/products.json") as Product[];
 
 let catalogCache: Product[] | undefined;
 
