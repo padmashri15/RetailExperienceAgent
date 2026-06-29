@@ -9,7 +9,6 @@ import { IconButton } from "./IconButton";
 
 type ProductModelKind = "shoe" | "trail_shoe" | "slide" | "jacket" | "apparel" | "vest" | "bag";
 type SurfaceMode = "matte" | "weather" | "reflective";
-type ModelSource = "uploaded" | "generated";
 
 interface Product3DViewerProps {
   onAgentActivity: (activity: AgentActivityInput) => void;
@@ -42,7 +41,8 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
   const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>("matte");
   const [modelScale, setModelScale] = useState(1);
   const [autoRotate, setAutoRotate] = useState(true);
-  const [modelSource, setModelSource] = useState<ModelSource>("generated");
+  const [isModelReady, setIsModelReady] = useState(false);
+  const [modelLoadFailed, setModelLoadFailed] = useState(false);
   const modelKind = useMemo(() => getProductModelKind(product), [product]);
   const colorway = colorways[colorwayIndex];
 
@@ -106,12 +106,12 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     scene.add(ground);
 
     let isMounted = true;
-    let productModel = createProductModel(product, modelKind, colorway, surfaceMode);
-    productModel.rotation.set(0.05, -0.52, 0);
-    scene.add(productModel);
-    setModelSource("generated");
+    let productModel: THREE.Group | undefined;
+    setIsModelReady(false);
+    setModelLoadFailed(false);
 
     const fitProductModel = (viewport = readStageViewport(stage)) => {
+      if (!productModel) return;
       fitModelToWrapperHeight(productModel, camera, viewport, modelScaleRef.current);
     };
     refitSceneRef.current = fitProductModel;
@@ -130,16 +130,14 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     loadUploadedProductModel(product, colorway, surfaceMode)
       .then((uploadedModel) => {
         if (!uploadedModel || !isMounted) return;
-        uploadedModel.rotation.copy(productModel.rotation);
-        scene.remove(productModel);
-        disposeObject(productModel);
+        uploadedModel.rotation.set(0.05, -0.52, 0);
         productModel = uploadedModel;
         scene.add(productModel);
         fitProductModel();
-        setModelSource("uploaded");
+        setIsModelReady(true);
       })
       .catch(() => {
-        if (isMounted) setModelSource("generated");
+        if (isMounted) setModelLoadFailed(true);
       });
 
     const resizeObserver = new ResizeObserver(([entry]) => {
@@ -161,7 +159,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     };
 
     const handlePointerMove = (event: PointerEvent) => {
-      if (!dragging) return;
+      if (!dragging || !productModel) return;
       const deltaX = event.clientX - lastX;
       const deltaY = event.clientY - lastY;
       productModel.rotation.y += deltaX * 0.01;
@@ -181,7 +179,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     canvas.addEventListener("pointercancel", handlePointerUp);
 
     const render = () => {
-      if (autoRotate && !dragging) productModel.rotation.y += 0.0045;
+      if (productModel && autoRotate && !dragging) productModel.rotation.y += 0.0045;
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(render);
     };
@@ -225,6 +223,14 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
       <div ref={stageRef} className="absolute inset-0">
         <canvas ref={canvasRef} className="block h-full w-full cursor-grab touch-none active:cursor-grabbing" />
       </div>
+
+      {!isModelReady ? (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center">
+          <div className="rounded-md border border-white/70 bg-white/86 px-4 py-3 text-xs font-semibold text-graphite shadow-panel backdrop-blur">
+            {modelLoadFailed ? "3D asset unavailable" : "Loading 3D asset"}
+          </div>
+        </div>
+      ) : null}
 
       <div className="pointer-events-none absolute left-4 top-4 max-w-[72%] text-ink sm:left-5 sm:top-5">
         {/* <div className="inline-flex items-center gap-2 rounded bg-white/86 px-3 py-2 text-xs font-semibold shadow-panel backdrop-blur">
