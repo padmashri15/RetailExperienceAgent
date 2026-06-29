@@ -230,7 +230,7 @@ export default function App() {
         </aside>
 
         <section className="min-w-0 p-3 sm:p-5 xl:p-6">
-          <div className="grid min-w-0 gap-5 2xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="min-w-0">
               {viewMode === "associate" ? (
                 <div className="grid min-w-0 gap-5">
@@ -241,7 +241,7 @@ export default function App() {
                     googleAnalyticsDetail={googleAnalyticsDetail}
                     googleAnalyticsMode={googleAnalyticsMode}
                   />
-                  <div className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(460px,1.05fr)]">
+                  <div className="grid gap-5 xl:grid-cols-[minmax(340px,0.95fr)_minmax(420px,1.05fr)] 2xl:grid-cols-[minmax(0,0.95fr)_minmax(460px,1.05fr)]">
                     <ChatPanel
                       customerProfile={customerProfile}
                       onAgentActivity={showAgentActivity}

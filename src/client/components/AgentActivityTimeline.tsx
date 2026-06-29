@@ -3,7 +3,7 @@ import type { AgentActivity } from "../lib/agentActivity";
 
 export function AgentActivityTimeline({ activities }: { activities: AgentActivity[] }) {
   return (
-    <aside className="panel min-w-0 p-4 2xl:sticky 2xl:top-5 2xl:max-h-[calc(100vh-40px)] 2xl:overflow-hidden">
+    <aside className="panel min-w-0 p-4 xl:sticky xl:top-5 xl:max-h-[calc(100vh-40px)] xl:overflow-hidden">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Activity size={18} className="text-pine" />
@@ -11,7 +11,7 @@ export function AgentActivityTimeline({ activities }: { activities: AgentActivit
         </div>
         <span className="rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-graphite">Live</span>
       </div>
-      <div className="space-y-3 2xl:max-h-[calc(100vh-112px)] 2xl:overflow-y-auto 2xl:pr-1">
+      <div className="space-y-3 xl:max-h-[calc(100vh-112px)] xl:overflow-y-auto xl:pr-1">
         {activities.slice(0, 8).map((activity, index) => {
           const toneClass = getToneClass(activity.tone);
           return (
