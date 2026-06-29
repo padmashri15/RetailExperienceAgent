@@ -28,14 +28,20 @@ const surfaceModes: Array<{ label: string; value: SurfaceMode }> = [
   { label: "Reflective", value: "reflective" }
 ];
 
-const MODEL_VIEWPORT_HEIGHT_RATIO = 0.735;
+const MODEL_VIEWPORT_HEIGHT_RATIO = 0.9;
 const MODEL_MIN_USER_SCALE = 0.72;
 const MODEL_MAX_USER_SCALE = 1.42;
+const MODEL_SAFE_AREA = {
+  bottom: 158,
+  top: 104
+};
 
 export function Product3DViewer({ onAgentActivity, product }: Product3DViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const autoRotateRef = useRef(true);
   const modelScaleRef = useRef(1);
+  const productModelRef = useRef<THREE.Group | undefined>(undefined);
   const refitSceneRef = useRef<(() => void) | null>(null);
   const [colorwayIndex, setColorwayIndex] = useState(0);
   const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>("matte");
@@ -45,6 +51,15 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
   const [modelLoadFailed, setModelLoadFailed] = useState(false);
   const modelKind = useMemo(() => getProductModelKind(product), [product]);
   const colorway = colorways[colorwayIndex];
+
+  useEffect(() => {
+    autoRotateRef.current = autoRotate;
+  }, [autoRotate]);
+
+  useEffect(() => {
+    if (!productModelRef.current) return;
+    updateUploadedModelSurface(productModelRef.current, surfaceMode);
+  }, [surfaceMode]);
 
   useEffect(() => {
     onAgentActivity({
@@ -107,6 +122,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
 
     let isMounted = true;
     let productModel: THREE.Group | undefined;
+    productModelRef.current = undefined;
     setIsModelReady(false);
     setModelLoadFailed(false);
 
@@ -132,6 +148,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
         if (!uploadedModel || !isMounted) return;
         uploadedModel.rotation.set(0.05, -0.52, 0);
         productModel = uploadedModel;
+        productModelRef.current = uploadedModel;
         scene.add(productModel);
         fitProductModel();
         setIsModelReady(true);
@@ -179,7 +196,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     canvas.addEventListener("pointercancel", handlePointerUp);
 
     const render = () => {
-      if (productModel && autoRotate && !dragging) productModel.rotation.y += 0.0045;
+      if (productModel && autoRotateRef.current && !dragging) productModel.rotation.y += 0.0045;
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(render);
     };
@@ -187,6 +204,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
 
     return () => {
       isMounted = false;
+      productModelRef.current = undefined;
       refitSceneRef.current = null;
       window.cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
@@ -197,7 +215,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
       disposeObject(scene);
       renderer.dispose();
     };
-  }, [autoRotate, colorway, modelKind, product, surfaceMode]);
+  }, [modelKind, product.id, product.modelUrl]);
 
   function handleModelScaleChange(delta: number) {
     setModelScale((current) => {
@@ -366,6 +384,22 @@ function prepareUploadedProductModel(
   return group;
 }
 
+function updateUploadedModelSurface(model: THREE.Object3D, surfaceMode: SurfaceMode) {
+  model.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+
+    materials.forEach((material) => {
+      if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
+        const finish = makeMaterial("#ffffff", surfaceMode);
+        material.roughness = finish.roughness;
+        material.metalness = Math.max(material.metalness, finish.metalness);
+        material.needsUpdate = true;
+      }
+    });
+  });
+}
+
 function fitModelToWrapperHeight(
   model: THREE.Object3D,
   camera: THREE.PerspectiveCamera,
@@ -379,10 +413,13 @@ function fitModelToWrapperHeight(
     MODEL_VIEWPORT_HEIGHT_RATIO * MODEL_MIN_USER_SCALE,
     MODEL_VIEWPORT_HEIGHT_RATIO * MODEL_MAX_USER_SCALE
   );
-  const targetHeight = viewport.height * targetRatio;
+  const safeTop = Math.min(MODEL_SAFE_AREA.top, viewport.height * 0.24);
+  const safeBottom = Math.min(MODEL_SAFE_AREA.bottom, viewport.height * 0.34);
+  const safeHeight = Math.max(viewport.height - safeTop - safeBottom, viewport.height * 0.38);
+  const targetHeight = safeHeight * targetRatio;
   camera.updateMatrixWorld(true);
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     model.updateMatrixWorld(true);
     const projectedBounds = measureProjectedBounds(model, camera, viewport);
     if (!projectedBounds || projectedBounds.height < 1) return;
@@ -393,6 +430,32 @@ function fitModelToWrapperHeight(
   }
 
   model.updateMatrixWorld(true);
+  alignModelToSafeArea(model, camera, viewport, safeTop, safeBottom);
+}
+
+function alignModelToSafeArea(
+  model: THREE.Object3D,
+  camera: THREE.PerspectiveCamera,
+  viewport: { width: number; height: number },
+  safeTop: number,
+  safeBottom: number
+) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    model.updateMatrixWorld(true);
+    const projectedBounds = measureProjectedBounds(model, camera, viewport);
+    if (!projectedBounds) return;
+
+    const targetCenterY = safeTop + (viewport.height - safeTop - safeBottom) / 2;
+    const currentCenterY = projectedBounds.y + projectedBounds.height / 2;
+    const deltaPixels = targetCenterY - currentCenterY;
+    if (Math.abs(deltaPixels) < 2) return;
+
+    const modelPosition = new THREE.Vector3();
+    model.getWorldPosition(modelPosition);
+    const distance = Math.max(camera.position.distanceTo(modelPosition), 0.1);
+    const visibleHeight = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * distance;
+    model.position.y += -(deltaPixels / viewport.height) * visibleHeight * 0.72;
+  }
 }
 
 function measureProjectedBounds(
@@ -435,6 +498,7 @@ function measureProjectedBounds(
 
   return {
     height: Math.max(maxY - minY, 0),
+    y: minY,
     width: Math.max(maxX - minX, 0)
   };
 }
