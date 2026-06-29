@@ -14,7 +14,7 @@ export async function sendChat(request: ChatRequest): Promise<ChatResponse> {
 
   const response = await fetch(`${apiBase}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(validation.value)
   });
 
@@ -54,7 +54,7 @@ export async function trackAnalyticsEvent(input: {
 
   await fetch(`${apiBase}/api/admin/events`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   }).catch(() => undefined);
 }
