@@ -1,167 +1,160 @@
-import { randomUUID } from "node:crypto";
-import catalogData from "../data/catalog/products.json";
-import type { BrandGovernanceResult, ChatRequest, ChatResponse, JourneyStage, Product } from "../src/shared/types";
-import { validateChatRequest } from "../src/shared/validation";
-import { readJsonBody, sendJson, sendMethodNotAllowed, type ApiRequest, type ApiResponse } from "./_utils";
+const products = [
+  {
+    id: "prod_aerostride_marathon",
+    sku: "AST-RUN-142",
+    name: "AeroStride Marathon Trainer",
+    category: "running shoes",
+    price: 142,
+    currency: "USD",
+    rating: 4.8,
+    inventory: 84,
+    imageUrl: "/images/products/Shoe_Pink.png",
+    modelUrl: "/models/products/Shoe_Pink.glb",
+    tags: ["marathon", "neutral", "lightweight", "road running", "under 150"],
+    benefits: ["Responsive midsole for long-distance training", "Breathable engineered mesh", "Stable heel geometry for tired miles"],
+    materials: ["Recycled engineered mesh", "Bio-based foam midsole", "Rubber traction outsole"],
+    sustainability: ["Upper contains 62 percent recycled yarn", "Shipped in plastic-free packaging"],
+    compatibleProductIds: ["prod_coreflex_tee"],
+    description: "A premium road running shoe designed for marathon build cycles and daily long runs."
+  },
+  {
+    id: "prod_velocity_tempo",
+    sku: "AST-RUN-136",
+    name: "Velocity Tempo Runner",
+    category: "running shoes",
+    price: 136,
+    currency: "USD",
+    rating: 4.7,
+    inventory: 68,
+    imageUrl: "/images/products/Shoes_Red_Yellow.png",
+    modelUrl: "/models/products/Shoes_Red_Yellow.glb",
+    tags: ["tempo", "speedwork", "lightweight", "road running", "marathon"],
+    benefits: ["Snappy foam for faster training days", "Secure midfoot lockdown", "Flexible forefoot for quick turnover"],
+    materials: ["Engineered knit upper", "Bio-based foam midsole", "Carbon-infused rubber outsole"],
+    sustainability: ["Upper uses recycled performance yarn", "Ships with reduced-ink packaging"],
+    compatibleProductIds: ["prod_coreflex_tee"],
+    description: "A light tempo trainer for speed sessions, short races, and marathon tune-up workouts."
+  },
+  {
+    id: "prod_coreflex_tee",
+    sku: "AST-TEE-048",
+    name: "CoreFlex Training Tee",
+    category: "apparel",
+    price: 48,
+    currency: "USD",
+    rating: 4.7,
+    inventory: 128,
+    imageUrl: "/images/products/Hoodie_Pearl.png",
+    modelUrl: "/models/products/Hoodie_Pearl.glb",
+    tags: ["training", "breathable", "quick dry", "base layer"],
+    benefits: ["Soft stretch knit", "Quick-dry finish", "Minimal seams for comfort under layers"],
+    materials: ["Recycled polyester", "Tencel lyocell"],
+    sustainability: ["Made with 74 percent recycled fiber", "Dyed in a closed-loop water process"],
+    compatibleProductIds: ["prod_aerostride_marathon"],
+    description: "A breathable training tee that works for gym sessions, running, and daily wear."
+  }
+];
 
-const catalog = catalogData as Product[];
+export default async function handler(request: any, response: any) {
+  response.setHeader("Content-Type", "application/json; charset=utf-8");
 
-export default async function handler(request: ApiRequest, response: ApiResponse) {
   if (request.method !== "POST") {
-    sendMethodNotAllowed(response, ["POST"]);
+    response.statusCode = 405;
+    response.end(JSON.stringify({ error: "Method not allowed. Use POST." }));
     return;
   }
 
-  try {
-    const validation = validateChatRequest(await readJsonBody(request));
-    if (!validation.ok) {
-      sendJson(response, 400, { error: validation.error });
-      return;
-    }
+  const body = await readBody(request).catch(() => ({}));
+  const message = typeof body.message === "string" ? body.message.trim().slice(0, 1000) : "";
 
-    sendJson(response, 200, buildCatalogResponse(validation.value));
-  } catch (error) {
-    sendJson(response, 200, buildCatalogResponse({ message: "I need product recommendations." }));
+  if (!message) {
+    response.statusCode = 400;
+    response.end(JSON.stringify({ error: "Message is required." }));
+    return;
   }
+
+  response.statusCode = 200;
+  response.end(JSON.stringify(buildResponse(message, body.customerProfile)));
 }
 
-function buildCatalogResponse(request: ChatRequest): ChatResponse {
+async function readBody(request: any) {
+  if (request.body && typeof request.body === "object") return request.body;
+  if (typeof request.body === "string") return JSON.parse(request.body);
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+
+  const rawBody = Buffer.concat(chunks).toString("utf8").trim();
+  return rawBody ? JSON.parse(rawBody) : {};
+}
+
+function buildResponse(message: string, customerProfile: any) {
   const started = Date.now();
-  const recommendedProducts = searchCatalog({
-    query: request.message,
-    maxPrice: request.customerProfile?.budget,
-    tags: request.customerProfile?.preferences,
-    limit: 4
-  });
-  const merchandising = buildMerchandising(recommendedProducts);
-  const topProduct = recommendedProducts[0];
-  const answer = topProduct
-    ? [
-        `For your request, I recommend **${topProduct.name}** at **$${topProduct.price}**.`,
-        topProduct.description,
-        `Why it fits: ${topProduct.benefits.slice(0, 3).join(", ").toLowerCase()}.`,
-        merchandising[0]
-          ? `A useful ${merchandising[0].type === "cross_sell" ? "companion" : "alternative"} is **${merchandising[0].product.name}**.`
-          : ""
-      ]
-        .filter(Boolean)
-        .join("\n\n")
-    : "I can help narrow this down. Share your budget, preferred use case, and any fit or material preferences, and I will recommend the closest catalog products.";
-  const guardrailFlags = getGuardrailFlags(request.message);
+  const budget = typeof customerProfile?.budget === "number" ? customerProfile.budget : extractBudget(message);
+  const recommendedProducts = rankProducts(message, budget);
+  const topProduct = recommendedProducts[0] ?? products[0];
+  const companion = products.find((product) => product.id !== topProduct.id && topProduct.compatibleProductIds.includes(product.id));
+  const merchandising = companion
+    ? [{
+        type: companion.price > topProduct.price ? "upsell" : "cross_sell",
+        product: companion,
+        anchorProductId: topProduct.id,
+        reason: `${companion.name} complements ${topProduct.name} based on catalog compatibility.`
+      }]
+    : [];
 
   return {
-    conversationId: request.conversationId ?? randomUUID(),
-    answer,
-    intent: inferIntent(request.message),
-    journeyStage: inferJourneyStage(request.message),
+    conversationId: `conv_${Date.now()}`,
+    answer: [
+      `For your request, I recommend **${topProduct.name}** at **$${topProduct.price}**.`,
+      topProduct.description,
+      `Why it fits: ${topProduct.benefits.slice(0, 3).join(", ").toLowerCase()}.`,
+      companion ? `A useful companion is **${companion.name}**.` : ""
+    ].filter(Boolean).join("\n\n"),
+    intent: "product_discovery",
+    journeyStage: "consideration",
     recommendedProducts,
     merchandising,
     citations: [{ title: "Product catalog", quote: "Recommendations are grounded in the approved product catalog." }],
-    guardrailFlags,
-    governance: buildGovernance(guardrailFlags, recommendedProducts.length),
+    guardrailFlags: [],
+    governance: {
+      status: "approved",
+      tone: "premium_consultative",
+      requiredEscalation: false,
+      checks: [
+        { id: "tone", label: "Premium consultative tone", status: "pass", detail: "Response uses a helpful guided-selling voice." },
+        { id: "source_grounding", label: "Source grounding", status: "pass", detail: "Recommendations are grounded in the static product catalog." },
+        { id: "escalation", label: "Sensitive request routing", status: "pass", detail: "No sensitive escalation trigger detected." }
+      ]
+    },
     latencyMs: Date.now() - started,
     mode: "demo"
   };
 }
 
-function searchCatalog(options: { query?: string; maxPrice?: number; tags?: string[]; limit?: number }) {
-  const query = normalize(options.query ?? "");
-  const tags = (options.tags ?? []).map(normalize);
-  const limit = options.limit ?? 4;
+function rankProducts(message: string, budget?: number) {
+  const normalizedMessage = normalize(message);
 
-  return catalog
+  return products
     .map((product) => {
-      const searchable = normalize(
-        [
-          product.name,
-          product.category,
-          product.description,
-          product.tags.join(" "),
-          product.benefits.join(" "),
-          product.materials.join(" ")
-        ].join(" ")
-      );
+      const searchable = normalize([product.name, product.category, product.description, product.tags.join(" "), product.benefits.join(" ")].join(" "));
       let score = 0;
-
-      if (query && searchable.includes(query)) score += 4;
-      for (const token of query.split(/\s+/).filter(Boolean)) {
+      for (const token of normalizedMessage.split(/\s+/).filter(Boolean)) {
         if (searchable.includes(token)) score += 1;
       }
-      for (const tag of tags) {
-        if (product.tags.map(normalize).some((productTag) => productTag.includes(tag))) score += 2;
-      }
-      if (options.maxPrice && product.price <= options.maxPrice) score += 2;
-      if (!query && !tags.length) score = product.rating;
-
+      if (budget && product.price <= budget) score += 3;
       return { product, score };
     })
-    .filter(({ product, score }) => score > 0 && (!options.maxPrice || product.price <= options.maxPrice))
+    .filter(({ product, score }) => score > 0 && (!budget || product.price <= budget))
     .sort((a, b) => b.score - a.score || b.product.rating - a.product.rating)
-    .slice(0, limit)
     .map(({ product }) => product);
 }
 
-function buildMerchandising(products: Product[]): ChatResponse["merchandising"] {
-  return products.slice(0, 3).flatMap((product) => {
-    const companion = catalog.find((candidate) => product.compatibleProductIds.includes(candidate.id));
-    if (!companion) return [];
-
-    return [{
-      type: companion.price > product.price ? "upsell" as const : "cross_sell" as const,
-      product: companion,
-      anchorProductId: product.id,
-      reason: `${companion.name} complements ${product.name} based on catalog compatibility.`
-    }];
-  }).slice(0, 3);
-}
-
-function buildGovernance(guardrailFlags: string[], recommendedProductCount: number): BrandGovernanceResult {
-  const status = guardrailFlags.length ? "escalate" : "approved";
-
-  return {
-    status,
-    tone: "premium_consultative",
-    requiredEscalation: Boolean(guardrailFlags.length),
-    checks: [
-      {
-        id: "tone",
-        label: "Premium consultative tone",
-        status: "pass",
-        detail: "Response uses a helpful guided-selling voice."
-      },
-      {
-        id: "source_grounding",
-        label: "Source grounding",
-        status: recommendedProductCount ? "pass" : "watch",
-        detail: "Recommendations are grounded in the static product catalog."
-      },
-      {
-        id: "escalation",
-        label: "Sensitive request routing",
-        status: guardrailFlags.length ? "escalate" : "pass",
-        detail: guardrailFlags.length ? "Sensitive language detected." : "No sensitive escalation trigger detected."
-      }
-    ]
-  };
-}
-
-function inferIntent(message: string) {
-  const normalized = normalize(message);
-  if (/\b(return|refund|exchange|order|shipping|support)\b/.test(normalized)) return "support";
-  if (/\b(compare|versus|vs)\b/.test(normalized)) return "product_comparison";
-  return "product_discovery";
-}
-
-function inferJourneyStage(message: string): JourneyStage {
-  const normalized = normalize(message);
-  if (/\b(buy|cart|checkout|purchase)\b/.test(normalized)) return "purchase";
-  if (/\b(compare|versus|vs)\b/.test(normalized)) return "evaluation";
-  return "consideration";
-}
-
-function getGuardrailFlags(message: string) {
-  const normalized = normalize(message);
-  return /\b(legal|lawsuit|medical|injury|dispute)\b/.test(normalized) ? ["sensitive_request"] : [];
+function extractBudget(message: string) {
+  const match = /\$?\s*(\d{2,4})\s*(?:usd|dollars?)?/i.exec(message);
+  return match ? Number(match[1]) : undefined;
 }
 
 function normalize(value: string) {

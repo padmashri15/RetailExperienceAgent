@@ -1,76 +1,95 @@
-import catalogData from "../data/catalog/products.json";
-import type { Product } from "../src/shared/types";
-import { sanitizeProductFilters } from "../src/shared/validation";
-import { getQuery, getQueryValue, sendJson, sendMethodNotAllowed, type ApiRequest, type ApiResponse } from "./_utils";
+const products = [
+  {
+    id: "prod_aerostride_marathon",
+    sku: "AST-RUN-142",
+    name: "AeroStride Marathon Trainer",
+    category: "running shoes",
+    price: 142,
+    currency: "USD",
+    rating: 4.8,
+    inventory: 84,
+    imageUrl: "/images/products/Shoe_Pink.png",
+    modelUrl: "/models/products/Shoe_Pink.glb",
+    tags: ["marathon", "neutral", "lightweight", "road running", "under 150"],
+    benefits: ["Responsive midsole for long-distance training", "Breathable engineered mesh", "Stable heel geometry for tired miles"],
+    materials: ["Recycled engineered mesh", "Bio-based foam midsole", "Rubber traction outsole"],
+    sustainability: ["Upper contains 62 percent recycled yarn", "Shipped in plastic-free packaging"],
+    compatibleProductIds: ["prod_coreflex_tee"],
+    description: "A premium road running shoe designed for marathon build cycles and daily long runs."
+  },
+  {
+    id: "prod_velocity_tempo",
+    sku: "AST-RUN-136",
+    name: "Velocity Tempo Runner",
+    category: "running shoes",
+    price: 136,
+    currency: "USD",
+    rating: 4.7,
+    inventory: 68,
+    imageUrl: "/images/products/Shoes_Red_Yellow.png",
+    modelUrl: "/models/products/Shoes_Red_Yellow.glb",
+    tags: ["tempo", "speedwork", "lightweight", "road running", "marathon"],
+    benefits: ["Snappy foam for faster training days", "Secure midfoot lockdown", "Flexible forefoot for quick turnover"],
+    materials: ["Engineered knit upper", "Bio-based foam midsole", "Carbon-infused rubber outsole"],
+    sustainability: ["Upper uses recycled performance yarn", "Ships with reduced-ink packaging"],
+    compatibleProductIds: ["prod_coreflex_tee"],
+    description: "A light tempo trainer for speed sessions, short races, and marathon tune-up workouts."
+  },
+  {
+    id: "prod_coreflex_tee",
+    sku: "AST-TEE-048",
+    name: "CoreFlex Training Tee",
+    category: "apparel",
+    price: 48,
+    currency: "USD",
+    rating: 4.7,
+    inventory: 128,
+    imageUrl: "/images/products/Hoodie_Pearl.png",
+    modelUrl: "/models/products/Hoodie_Pearl.glb",
+    tags: ["training", "breathable", "quick dry", "base layer"],
+    benefits: ["Soft stretch knit", "Quick-dry finish", "Minimal seams for comfort under layers"],
+    materials: ["Recycled polyester", "Tencel lyocell"],
+    sustainability: ["Made with 74 percent recycled fiber", "Dyed in a closed-loop water process"],
+    compatibleProductIds: ["prod_aerostride_marathon"],
+    description: "A breathable training tee that works for gym sessions, running, and daily wear."
+  }
+];
 
-const catalog = catalogData as Product[];
+export default function handler(request: any, response: any) {
+  response.setHeader("Content-Type", "application/json; charset=utf-8");
 
-export default function handler(request: ApiRequest, response: ApiResponse) {
   if (request.method !== "GET") {
-    sendMethodNotAllowed(response, ["GET"]);
+    response.statusCode = 405;
+    response.end(JSON.stringify({ error: "Method not allowed. Use GET." }));
     return;
   }
 
-  const query = getQuery(request);
-  const filters = sanitizeProductFilters({
-    query: getQueryValue(query, "q"),
-    category: getQueryValue(query, "category"),
-    maxPrice: getQueryValue(query, "maxPrice"),
-    limit: getQueryValue(query, "limit") ?? 8,
-    strictBudget: getQueryValue(query, "strictBudget") === "true",
-    tags: getQueryValue(query, "tags")?.split(",")
-  });
-  const hasFilters = Boolean(filters.query || filters.category || filters.maxPrice || filters.tags?.length);
-  const products = hasFilters ? searchCatalog(filters) : catalog;
+  const url = new URL(request.url ?? "/", "https://retail-experience-agent.local");
+  const query = normalize(url.searchParams.get("q") ?? "");
+  const maxPrice = Number(url.searchParams.get("maxPrice") ?? "");
+  const limit = Number(url.searchParams.get("limit") ?? "8");
+  const filteredProducts = query || Number.isFinite(maxPrice)
+    ? rankProducts(query, Number.isFinite(maxPrice) && maxPrice > 0 ? maxPrice : undefined).slice(0, Number.isFinite(limit) ? limit : 8)
+    : products;
 
-  sendJson(response, 200, { products });
+  response.statusCode = 200;
+  response.end(JSON.stringify({ products: filteredProducts }));
 }
 
-function searchCatalog(options: {
-  query?: string;
-  category?: string;
-  maxPrice?: number;
-  tags?: string[];
-  limit?: number;
-  strictBudget?: boolean;
-}) {
-  const query = normalize(options.query ?? "");
-  const tags = (options.tags ?? []).map(normalize);
-  const category = normalize(options.category ?? "");
-  const limit = options.limit ?? 8;
-  const strictBudget = options.strictBudget ?? true;
-
-  return catalog
+function rankProducts(query: string, budget?: number) {
+  return products
     .map((product) => {
-      const searchable = normalize(
-        [
-          product.name,
-          product.category,
-          product.description,
-          product.tags.join(" "),
-          product.benefits.join(" "),
-          product.materials.join(" ")
-        ].join(" ")
-      );
+      const searchable = normalize([product.name, product.category, product.description, product.tags.join(" "), product.benefits.join(" ")].join(" "));
       let score = 0;
-
-      if (query && searchable.includes(query)) score += 4;
       for (const token of query.split(/\s+/).filter(Boolean)) {
         if (searchable.includes(token)) score += 1;
       }
-      if (category && normalize(product.category).includes(category)) score += 3;
-      if (options.maxPrice && product.price <= options.maxPrice) score += 2;
-      if (options.maxPrice && !strictBudget && product.price > options.maxPrice && product.price <= options.maxPrice + 35) score += 1;
-      for (const tag of tags) {
-        if (product.tags.map(normalize).some((productTag) => productTag.includes(tag))) score += 2;
-      }
-      if (score === 0 && !query && !category && !tags.length) score = product.rating;
-
+      if (budget && product.price <= budget) score += 3;
+      if (!query && !budget) score = product.rating;
       return { product, score };
     })
-    .filter(({ product, score }) => score > 0 && (!options.maxPrice || !strictBudget || product.price <= options.maxPrice))
+    .filter(({ product, score }) => score > 0 && (!budget || product.price <= budget))
     .sort((a, b) => b.score - a.score || b.product.rating - a.product.rating)
-    .slice(0, limit)
     .map(({ product }) => product);
 }
 
