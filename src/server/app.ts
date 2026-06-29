@@ -50,6 +50,10 @@ export function createApp(options: ServerAppOptions = {}) {
   app.use(["/api/products", "/products"], createCatalogRouter());
   app.use(["/api/ingest", "/ingest"], createIngestRouter());
 
+  app.use(["/api", "/chat", "/admin", "/products", "/ingest"], (request, response) => {
+    response.status(404).json({ error: `API route not found: ${request.method} ${request.path}` });
+  });
+
   if (serveClient && existsSync(indexHtmlPath)) {
     app.use(express.static(clientDistPath));
     app.get("*", (request, response, next) => {
@@ -63,9 +67,23 @@ export function createApp(options: ServerAppOptions = {}) {
   }
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+    if (isJsonSyntaxError(error)) {
+      response.status(400).json({ error: "Request body must be valid JSON." });
+      return;
+    }
+
     const message = error instanceof Error ? error.message : "Unknown server error";
     response.status(500).json({ error: message });
   });
 
   return app;
+}
+
+function isJsonSyntaxError(error: unknown) {
+  return (
+    error instanceof SyntaxError &&
+    "status" in error &&
+    (error as { status?: number }).status === 400 &&
+    "body" in error
+  );
 }

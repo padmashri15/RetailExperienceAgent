@@ -1,41 +1,36 @@
 import type { AnalyticsSummary, ChatRequest, ChatResponse, HealthStatus, Product, ProductFilters } from "../../shared/types";
+import { sanitizeProductFilters, validateChatRequest } from "../../shared/validation";
 import { getClientId, getSessionId } from "./clientIdentity";
 import { trackGoogleAnalyticsEvent } from "./googleAnalytics";
+import { buildApiErrorMessage, readJsonResponse } from "./http";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "";
 
 export async function sendChat(request: ChatRequest): Promise<ChatResponse> {
+  const validation = validateChatRequest(request);
+  if (!validation.ok) {
+    throw new Error(validation.error);
+  }
+
   const response = await fetch(`${apiBase}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request)
+    body: JSON.stringify(validation.value)
   });
 
-  if (!response.ok) {
-    throw new Error(await buildApiErrorMessage(response, "Chat request failed"));
-  }
-
-  return response.json() as Promise<ChatResponse>;
+  return readJsonResponse<ChatResponse>(response, "Chat request failed", "/api/chat");
 }
 
 export async function fetchHealth(): Promise<HealthStatus> {
   const response = await fetch(`${apiBase}/health`);
 
-  if (!response.ok) {
-    throw new Error(await buildApiErrorMessage(response, "Health request failed"));
-  }
-
-  return response.json() as Promise<HealthStatus>;
+  return readJsonResponse<HealthStatus>(response, "Health request failed", "/health");
 }
 
 export async function fetchAnalytics(): Promise<AnalyticsSummary> {
   const response = await fetch(`${apiBase}/api/admin/analytics`);
 
-  if (!response.ok) {
-    throw new Error(await buildApiErrorMessage(response, "Analytics request failed"));
-  }
-
-  return response.json() as Promise<AnalyticsSummary>;
+  return readJsonResponse<AnalyticsSummary>(response, "Analytics request failed", "/api/admin/analytics");
 }
 
 export async function trackAnalyticsEvent(input: {
@@ -65,29 +60,25 @@ export async function trackAnalyticsEvent(input: {
 }
 
 export async function fetchProducts(filters: ProductFilters = {}): Promise<Product[]> {
+  const safeFilters = sanitizeProductFilters(filters);
   const params = new URLSearchParams();
 
-  if (filters.query) params.set("q", filters.query);
-  if (filters.category) params.set("category", filters.category);
-  if (filters.maxPrice) params.set("maxPrice", String(filters.maxPrice));
-  if (filters.limit) params.set("limit", String(filters.limit));
-  if (filters.strictBudget !== undefined) params.set("strictBudget", String(filters.strictBudget));
-  if (filters.tags?.length) params.set("tags", filters.tags.join(","));
+  if (safeFilters.query) params.set("q", safeFilters.query);
+  if (safeFilters.category) params.set("category", safeFilters.category);
+  if (safeFilters.maxPrice) params.set("maxPrice", String(safeFilters.maxPrice));
+  if (safeFilters.limit) params.set("limit", String(safeFilters.limit));
+  if (safeFilters.strictBudget !== undefined) params.set("strictBudget", String(safeFilters.strictBudget));
+  if (safeFilters.tags?.length) params.set("tags", safeFilters.tags.join(","));
 
   const query = params.toString();
 
   try {
     const response = await fetch(`${apiBase}/api/products${query ? `?${query}` : ""}`);
-
-    if (!response.ok) {
-      throw new Error(await buildApiErrorMessage(response, "Product request failed"));
-    }
-
-    const body = (await response.json()) as { products: Product[] };
+    const body = await readJsonResponse<{ products: Product[] }>(response, "Product request failed", "/api/products");
     return body.products;
   } catch (error) {
     console.warn(error instanceof Error ? error.message : "Product API unavailable; using static catalog fallback");
-    return fetchStaticProducts(filters);
+    return fetchStaticProducts(safeFilters);
   }
 }
 
@@ -95,10 +86,10 @@ async function fetchStaticProducts(filters: ProductFilters) {
   const response = await fetch("/catalog/products.json", { cache: "no-store" });
 
   if (!response.ok) {
-    throw new Error(await buildApiErrorMessage(response, "Static product catalog request failed"));
+    throw new Error(await buildApiErrorMessage(response, "Static product catalog request failed", "/catalog/products.json"));
   }
 
-  const products = (await response.json()) as Product[];
+  const products = await readJsonResponse<Product[]>(response, "Static product catalog request failed", "/catalog/products.json");
   return filterProducts(products, filters);
 }
 
@@ -152,11 +143,4 @@ function filterProducts(catalog: Product[], filters: ProductFilters) {
 
 function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-}
-
-async function buildApiErrorMessage(response: Response, fallback: string) {
-  const body = await response
-    .json()
-    .catch(() => undefined) as { error?: string } | undefined;
-  return body?.error ? `${fallback}: ${body.error}` : `${fallback}: ${response.status}`;
 }

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import type { ChatRequest } from "../../shared/types";
+import { validateChatRequest } from "../../shared/validation";
 import type { TelemetryRepository } from "../db/repository";
 import { runRetailAgent } from "../agent/retailAgent";
 
@@ -8,14 +8,14 @@ export function createChatRouter(repository: TelemetryRepository) {
 
   router.post("/", async (request, response, next) => {
     try {
-      const body = request.body as ChatRequest;
+      const validation = validateChatRequest(request.body);
 
-      if (!body.message || typeof body.message !== "string") {
-        response.status(400).json({ error: "message is required" });
+      if (!validation.ok) {
+        response.status(400).json({ error: validation.error });
         return;
       }
 
-      const result = await runRetailAgent(body, repository);
+      const result = await runRetailAgent(validation.value, repository);
       response.json(result);
     } catch (error) {
       next(error);

@@ -19,6 +19,7 @@ import { fetchProducts, trackAnalyticsEvent } from "./lib/api";
 import type { AgentActivity, AgentActivityInput } from "./lib/agentActivity";
 import { readStoredCustomerProfile, storeCustomerProfile } from "./lib/customerProfile";
 import { initializeGoogleAnalytics } from "./lib/googleAnalytics";
+import { readJsonResponse } from "./lib/http";
 import { buildShoppingContext } from "./lib/preferenceProfiles";
 import { AgentCallout } from "./components/AgentCallout";
 import { AgentActivityTimeline } from "./components/AgentActivityTimeline";
@@ -78,11 +79,10 @@ export default function App() {
 
     fetch("/api/admin/ga4/diagnostics")
       .then(async (response) => {
-        if (!response.ok) throw new Error(`GA diagnostics failed: ${response.status}`);
-        return response.json() as Promise<{
+        return readJsonResponse<{
           realtimeError?: string | null;
           status?: { measurementConfigured?: boolean; reportingConfigured?: boolean };
-        }>;
+        }>(response, "GA diagnostics failed", "/api/admin/ga4/diagnostics");
       })
       .then((diagnostics) => {
         if (!isMounted) return;

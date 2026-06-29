@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { sanitizeStringArray, sanitizeText } from "../../shared/validation";
 import { env, isGoogleAnalyticsMeasurementConfigured } from "../config/env";
 import type { TelemetryRepository } from "../db/repository";
 import {
@@ -80,19 +81,18 @@ export function createAdminRouter(repository: TelemetryRepository) {
         value?: number;
         metadata?: Record<string, unknown>;
       };
+      const eventName = sanitizeText(body.eventName, 80);
 
-      if (!body.eventName || typeof body.eventName !== "string") {
+      if (!eventName) {
         response.status(400).json({ error: "eventName is required" });
         return;
       }
 
       await repository.trackConversion({
-        eventName: body.eventName,
-        productIds: Array.isArray(body.productIds)
-          ? body.productIds.filter((productId): productId is string => typeof productId === "string")
-          : [],
-        value: typeof body.value === "number" ? body.value : 0,
-        metadata: body.metadata ?? {}
+        eventName,
+        productIds: sanitizeStringArray(body.productIds) ?? [],
+        value: typeof body.value === "number" && Number.isFinite(body.value) ? Math.max(0, body.value) : 0,
+        metadata: sanitizeMetadata(body.metadata)
       });
 
       response.json({ ok: true });
@@ -102,6 +102,25 @@ export function createAdminRouter(repository: TelemetryRepository) {
   });
 
   return router;
+}
+
+function sanitizeMetadata(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => Boolean(sanitizeText(key, 60)))
+      .slice(0, 24)
+      .map(([key, entry]) => [key, sanitizeMetadataValue(entry)])
+  );
+}
+
+function sanitizeMetadataValue(value: unknown): unknown {
+  if (typeof value === "string") return sanitizeText(value, 200);
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.slice(0, 12).map(sanitizeMetadataValue).filter((item) => item !== undefined);
+  return undefined;
 }
 
 async function getGoogleAnalyticsRealtimeDiagnostics() {

@@ -1,4 +1,5 @@
 import type { CustomerProfile } from "../../shared/types";
+import { sanitizeCustomerProfile } from "../../shared/validation";
 
 export const customerProfileStorageKey = "brand-experience-agent.customer-profile";
 
@@ -30,10 +31,10 @@ export function readStoredCustomerProfile(): CustomerProfile {
       return defaultCustomerProfile;
     }
 
-    const normalizedProfile = {
+    const normalizedProfile = sanitizeCustomerProfile({
       ...defaultCustomerProfile,
       ...parsedProfile
-    };
+    }) ?? defaultCustomerProfile;
     if (normalizedProfile.id === defaultCustomerProfile.id) {
       normalizedProfile.name = "John Doe";
     }
@@ -51,7 +52,7 @@ export function readStoredCustomerProfile(): CustomerProfile {
 
 export function storeCustomerProfile(profile: CustomerProfile) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(customerProfileStorageKey, JSON.stringify(profile));
+  window.localStorage.setItem(customerProfileStorageKey, JSON.stringify(sanitizeCustomerProfile(profile) ?? defaultCustomerProfile));
 }
 
 function isLegacyMarathonDefault(profile: Partial<CustomerProfile>) {

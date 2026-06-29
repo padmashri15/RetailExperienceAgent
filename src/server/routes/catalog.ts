@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { sanitizeProductFilters } from "../../shared/validation";
 import { loadCatalog, searchCatalog } from "../services/catalog";
 
 export function createCatalogRouter() {
@@ -6,15 +7,17 @@ export function createCatalogRouter() {
 
   router.get("/", async (request, response, next) => {
     try {
-      const query = typeof request.query.q === "string" ? request.query.q : undefined;
-      const category = typeof request.query.category === "string" ? request.query.category : undefined;
-      const maxPrice = parseNumber(request.query.maxPrice);
-      const limit = parseNumber(request.query.limit) ?? 8;
-      const strictBudget = request.query.strictBudget === "true";
-      const tags = parseTags(request.query.tags);
-      const hasFilters = Boolean(query || category || maxPrice || tags.length);
+      const filters = sanitizeProductFilters({
+        query: typeof request.query.q === "string" ? request.query.q : undefined,
+        category: typeof request.query.category === "string" ? request.query.category : undefined,
+        maxPrice: request.query.maxPrice,
+        limit: request.query.limit ?? 8,
+        strictBudget: request.query.strictBudget === "true",
+        tags: parseTags(request.query.tags)
+      });
+      const hasFilters = Boolean(filters.query || filters.category || filters.maxPrice || filters.tags?.length);
       const products = hasFilters
-        ? await searchCatalog({ query, category, maxPrice, tags, limit, strictBudget })
+        ? await searchCatalog(filters)
         : await loadCatalog();
       response.json({ products });
     } catch (error) {
@@ -23,12 +26,6 @@ export function createCatalogRouter() {
   });
 
   return router;
-}
-
-function parseNumber(value: unknown) {
-  if (typeof value !== "string") return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function parseTags(value: unknown) {

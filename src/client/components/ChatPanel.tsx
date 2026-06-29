@@ -23,6 +23,7 @@ import type {
   Product,
   ShoppingContext
 } from "../../shared/types";
+import { sanitizeBudget, sanitizeCustomerProfile, sanitizeText } from "../../shared/validation";
 import { fetchHealth, fetchProducts, sendChat, trackAnalyticsEvent } from "../lib/api";
 import type { AgentActivityInput } from "../lib/agentActivity";
 import {
@@ -116,11 +117,12 @@ export function ChatPanel({
   }, [hasUserMessages, welcomeMessage]);
 
   function saveProfileDraft() {
+    const safeDraft = sanitizeCustomerProfile(profileDraft) ?? {};
     const nextProfile: CustomerProfile = {
       ...profile,
-      ...profileDraft,
+      ...safeDraft,
       budget,
-      preferences: mergePreferences(preference, profileDraft.preferences)
+      preferences: mergePreferences(preference, safeDraft.preferences)
     };
 
     onCustomerProfileChange(nextProfile);
@@ -134,6 +136,7 @@ export function ChatPanel({
   }
 
   function handlePreferenceChange(nextPreference: PreferenceKey) {
+    if (!preferenceKeys.includes(nextPreference)) return;
     setPreference(nextPreference);
     onShoppingContextChange(buildShoppingContext(nextPreference, budget));
     onAgentActivity({
@@ -145,11 +148,12 @@ export function ChatPanel({
   }
 
   function handleBudgetChange(nextBudget: number) {
-    setBudget(nextBudget);
-    onShoppingContextChange(buildShoppingContext(preference, nextBudget));
+    const safeBudget = sanitizeBudget(nextBudget) ?? 150;
+    setBudget(safeBudget);
+    onShoppingContextChange(buildShoppingContext(preference, safeBudget));
     onAgentActivity({
       agent: "Customer Profile / Preference Agent",
-      action: `Budget changed to $${nextBudget}`,
+      action: `Budget changed to $${safeBudget}`,
       detail: "Refreshes recommendation constraints and stores the shopper's budget ceiling for future turns.",
       tone: "pine"
     });
@@ -166,10 +170,15 @@ export function ChatPanel({
   }
 
   async function submit(message: string) {
-    if (!message.trim() || isLoading) return;
+    const safeMessage = sanitizeText(message, 1_000);
+    if (isLoading) return;
+    if (!safeMessage) {
+      setError("Please enter a message before sending.");
+      return;
+    }
 
-    const inferredPreference = inferPreferenceFromText(message, preference);
-    const inferredBudget = inferBudgetFromText(message);
+    const inferredPreference = inferPreferenceFromText(safeMessage, preference);
+    const inferredBudget = inferBudgetFromText(safeMessage);
     const activePreference = inferredPreference?.preference ?? preference;
     const activeBudget = inferredBudget?.budget ?? budget;
     const activeContext = buildShoppingContext(activePreference, activeBudget);
@@ -224,7 +233,7 @@ export function ChatPanel({
       }
     }
 
-    const nextMessages: ConversationMessage[] = [...messages, { role: "user", content: message }];
+    const nextMessages: ConversationMessage[] = [...messages, { role: "user", content: safeMessage }];
     setMessages(nextMessages);
     setInput("");
     setError(null);
@@ -235,7 +244,7 @@ export function ChatPanel({
         conversationId,
         customerProfile: activeProfile,
         history: messages,
-        message
+        message: safeMessage
       });
 
       setConversationId(result.conversationId);
@@ -589,6 +598,7 @@ export function ChatPanel({
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
+            maxLength={1000}
             placeholder={`Ask about ${shoppingContext.preferenceLabel.toLowerCase()} products, policies, orders, or checkout`}
             className="h-10 min-w-0 rounded-md border border-slate-200 bg-white px-4 text-sm text-ink outline-none focus:border-pine"
           />
@@ -837,7 +847,8 @@ function CustomerProfileForm({
           Name
           <input
             value={draft.name ?? ""}
-            onChange={(event) => onChange({ ...draft, name: event.target.value })}
+            maxLength={160}
+            onChange={(event) => onChange({ ...draft, name: sanitizeText(event.target.value) ?? "" })}
             className="mt-2 h-10 w-full rounded-md border border-emerald-100 bg-white px-3 text-sm font-medium normal-case text-ink outline-none focus:border-pine"
           />
         </label>
@@ -845,7 +856,8 @@ function CustomerProfileForm({
           Location
           <input
             value={draft.location ?? ""}
-            onChange={(event) => onChange({ ...draft, location: event.target.value })}
+            maxLength={160}
+            onChange={(event) => onChange({ ...draft, location: sanitizeText(event.target.value) ?? "" })}
             className="mt-2 h-10 w-full rounded-md border border-emerald-100 bg-white px-3 text-sm font-medium normal-case text-ink outline-none focus:border-pine"
           />
         </label>
@@ -881,6 +893,7 @@ function CustomerProfileForm({
         History
         <input
           value={shoppingHistory}
+          maxLength={300}
           onChange={(event) =>
             onChange({
               ...draft,

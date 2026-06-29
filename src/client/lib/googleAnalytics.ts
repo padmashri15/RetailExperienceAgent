@@ -1,4 +1,5 @@
 import { getClientId, getSessionId } from "./clientIdentity";
+import { readJsonResponse } from "./http";
 
 const apiBase = import.meta.env.VITE_API_BASE ?? "";
 const scriptId = "ga4-gtag-script";
@@ -121,7 +122,11 @@ async function resolveGoogleAnalyticsClientConfig(): Promise<GoogleAnalyticsClie
   return fetch(`${apiBase}/api/admin/ga4/config`)
     .then(async (response) => {
       if (!response.ok) return null;
-      const body = (await response.json()) as Omit<GoogleAnalyticsClientConfig, "source">;
+      const body = await readJsonResponse<Omit<GoogleAnalyticsClientConfig, "source">>(
+        response,
+        "GA4 config request failed",
+        "/api/admin/ga4/config"
+      );
       if (!body.measurementId) return null;
 
       return {
