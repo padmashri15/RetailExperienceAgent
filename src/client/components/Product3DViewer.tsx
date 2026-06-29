@@ -232,13 +232,13 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
         </div>
       ) : null}
 
-      <div className="pointer-events-none absolute left-4 top-4 max-w-[72%] text-ink sm:left-5 sm:top-5">
+      <div className="pointer-events-none absolute inset-x-4 top-4 rounded-md border border-white/70 bg-white/82 p-3 pr-16 text-ink shadow-sm backdrop-blur sm:inset-x-5 sm:top-5 sm:pr-20">
         {/* <div className="inline-flex items-center gap-2 rounded bg-white/86 px-3 py-2 text-xs font-semibold shadow-panel backdrop-blur">
           <Palette size={14} className="text-iris" />
           {modelSource === "uploaded" ? "Product 3D asset" : "Interactive 3D fit view"}
         </div> */}
-        <h3 className="mt-3 text-2xl font-semibold leading-tight sm:text-3xl">{product.name}</h3>
-        <p className="mt-2 max-w-md text-xs font-medium text-graphite sm:text-sm">{product.category}</p>
+        <h3 className="max-w-full break-words text-lg font-semibold leading-snug sm:text-xl">{product.name}</h3>
+        <p className="mt-1 max-w-full truncate text-xs font-medium text-graphite sm:text-sm">{product.category}</p>
       </div>
 
       <div className="absolute right-4 top-4 grid gap-2 sm:right-5 sm:top-5">
