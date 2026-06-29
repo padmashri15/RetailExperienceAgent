@@ -7,7 +7,7 @@ export function AgentCallout({ activity }: { activity: AgentActivity }) {
   return (
     <aside
       aria-live="polite"
-      className={`fixed right-3 top-20 z-50 w-[min(360px,calc(100vw-24px))] rounded-md border bg-white p-3 shadow-panel ${toneClass.border}`}
+      className={`rounded-md border bg-white p-3 shadow-panel ${toneClass.border}`}
     >
       <div className="flex items-start gap-3">
         <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-md ${toneClass.icon}`}>
@@ -54,4 +54,3 @@ function getToneClass(tone: AgentActivity["tone"]) {
       };
   }
 }
-

@@ -474,7 +474,7 @@ export function ChatPanel({
   }
 
   return (
-    <section className="panel flex min-h-[620px] flex-col overflow-hidden xl:sticky xl:top-5 xl:max-h-[calc(100vh-40px)]">
+    <section className="panel flex min-h-[620px] flex-col overflow-hidden">
       <div className="border-b border-slate-200 bg-white p-4 sm:p-5">
         <div className="flex items-center justify-between gap-4">
           <div>

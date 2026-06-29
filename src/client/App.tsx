@@ -187,7 +187,6 @@ export default function App() {
 
   return (
     <main className="min-h-screen bg-cloud text-ink">
-      <AgentCallout activity={agentActivity} />
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[92px_1fr]">
         <aside className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:h-screen lg:flex-col lg:items-center lg:justify-start lg:border-b-0 lg:border-r lg:px-0 lg:py-5">
           <div className="grid h-12 w-12 place-items-center rounded-md bg-ink text-white shadow-panel">
@@ -235,6 +234,7 @@ export default function App() {
             <div className="min-w-0">
               {viewMode === "associate" ? (
                 <div className="grid min-w-0 gap-5">
+                  <AgentCallout activity={agentActivity} />
                   <RetailContextBand context={shoppingContext} customerProfile={customerProfile} heroProduct={products[0] ?? catalog[0]} />
                   <AgentHandoffBand
                     context={shoppingContext}
@@ -261,6 +261,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="grid min-w-0 gap-5">
+                  <AgentCallout activity={agentActivity} />
                   <DashboardHeader />
                   <Dashboard onAgentActivity={showAgentActivity} />
                 </div>
