@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Minus, Plus, RotateCw } from "lucide-react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Product } from "../../shared/types";
 import { trackAnalyticsEvent } from "../lib/api";
 import type { AgentActivityInput } from "../lib/agentActivity";
+import { IconButton } from "./IconButton";
 
 type ProductModelKind = "shoe" | "trail_shoe" | "slide" | "jacket" | "apparel" | "vest" | "bag";
 type SurfaceMode = "matte" | "weather" | "reflective";
@@ -28,7 +29,7 @@ const surfaceModes: Array<{ label: string; value: SurfaceMode }> = [
   { label: "Reflective", value: "reflective" }
 ];
 
-const MODEL_VIEWPORT_HEIGHT_RATIO = 0.82;
+const MODEL_VIEWPORT_HEIGHT_RATIO = 0.735;
 const MODEL_MIN_USER_SCALE = 0.72;
 const MODEL_MAX_USER_SCALE = 1.42;
 
@@ -44,7 +45,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
   const [colorwayIndex, setColorwayIndex] = useState(0);
   const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>("matte");
   const [modelScale, setModelScale] = useState(1);
-  const [autoRotate, setAutoRotate] = useState(false);
+  const [autoRotate, setAutoRotate] = useState(true);
   const [modelSource, setModelSource] = useState<ModelSource>("loading");
   const modelKind = useMemo(() => getProductModelKind(product), [product]);
   const colorway = colorways[colorwayIndex];
@@ -150,20 +151,17 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
-    const clock = new THREE.Clock();
 
     const handlePointerDown = (event: PointerEvent) => {
-      event.preventDefault();
       dragging = true;
       lastX = event.clientX;
       lastY = event.clientY;
-      if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
+      canvas.setPointerCapture(event.pointerId);
     };
 
     const handlePointerMove = (event: PointerEvent) => {
       const productModel = modelRef.current;
       if (!dragging || !productModel) return;
-      event.preventDefault();
       const deltaX = event.clientX - lastX;
       const deltaY = event.clientY - lastY;
       productModel.rotation.y += deltaX * 0.01;
@@ -181,13 +179,10 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     canvas.addEventListener("pointermove", handlePointerMove);
     canvas.addEventListener("pointerup", handlePointerUp);
     canvas.addEventListener("pointercancel", handlePointerUp);
-    canvas.addEventListener("lostpointercapture", handlePointerUp);
-    window.addEventListener("pointerup", handlePointerUp);
 
     const render = () => {
       const productModel = modelRef.current;
-      const deltaSeconds = Math.min(clock.getDelta(), 0.05);
-      if (productModel && autoRotateRef.current && !dragging) productModel.rotation.y += deltaSeconds * 0.75;
+      if (productModel && autoRotateRef.current && !dragging) productModel.rotation.y += 0.0045;
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(render);
     };
@@ -203,8 +198,6 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("pointerup", handlePointerUp);
       canvas.removeEventListener("pointercancel", handlePointerUp);
-      canvas.removeEventListener("lostpointercapture", handlePointerUp);
-      window.removeEventListener("pointerup", handlePointerUp);
       removeActiveProductModel(scene);
       disposeObject(scene);
       renderer.dispose();
@@ -220,7 +213,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     setModelSource("loading");
     removeActiveProductModel(scene);
 
-    loadUploadedProductModel(product, surfaceMode)
+    loadUploadedProductModel(product, colorway, surfaceMode)
       .then((uploadedModel) => {
         if (modelLoadIdRef.current !== loadId || sceneRef.current !== scene) {
           if (uploadedModel) disposeObject(uploadedModel);
@@ -248,19 +241,13 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
       modelLoadIdRef.current += 1;
       removeActiveProductModel(scene);
     };
-  }, [product.id, product.modelUrl]);
-
-  useEffect(() => {
-    const activeModel = modelRef.current;
-    if (!activeModel || modelSource !== "uploaded") return;
-    updateUploadedModelSurface(activeModel, surfaceMode);
-  }, [modelSource, surfaceMode]);
+  }, [colorway, product.id, product.modelUrl, surfaceMode]);
 
   function handleModelScaleChange(delta: number) {
     setModelScale((current) => {
       const next = clamp(current + delta, MODEL_MIN_USER_SCALE, MODEL_MAX_USER_SCALE);
       modelScaleRef.current = next;
-      refitSceneRef.current?.();
+      window.requestAnimationFrame(() => refitSceneRef.current?.());
       return next;
     });
   }
@@ -276,45 +263,43 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
   }
 
   return (
-    <div className="grid min-h-[560px] grid-rows-[auto_minmax(300px,1fr)_auto] overflow-hidden bg-[radial-gradient(circle_at_30%_18%,rgba(255,255,255,0.96),rgba(232,239,246,0.92)_38%,rgba(206,218,230,0.95))] sm:min-h-[590px]">
-      <div className="grid gap-1 px-4 pb-2 pt-4 text-ink sm:px-5 sm:pt-5">
-        <h3 className="line-clamp-2 max-w-[42rem] break-words text-xl font-semibold leading-tight sm:text-2xl">
-          {product.name}
-        </h3>
-        <p className="max-w-md truncate text-xs font-medium text-graphite sm:text-sm">{product.category}</p>
-      </div>
-
-      <div ref={stageRef} className="relative min-h-[300px] overflow-hidden">
+    <div className="relative h-[clamp(360px,108vw,430px)] overflow-hidden bg-[radial-gradient(circle_at_30%_18%,rgba(255,255,255,0.96),rgba(232,239,246,0.92)_38%,rgba(206,218,230,0.95))] sm:h-[clamp(430px,48vw,560px)]">
+      <div ref={stageRef} className="absolute inset-0">
         <canvas ref={canvasRef} className="block h-full w-full cursor-grab touch-none active:cursor-grabbing" />
-
-        {modelSource === "loading" ? (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center" role="status" aria-label="Loading 3D product">
-            <span className="h-9 w-9 animate-spin rounded-full border-2 border-white/80 border-t-pine shadow-panel" />
-          </div>
-        ) : null}
-
-        {modelSource === "unavailable" ? (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center">
-            <span className="rounded-md border border-white/70 bg-white/88 px-4 py-3 text-xs font-semibold text-graphite shadow-panel backdrop-blur">
-              3D model unavailable
-            </span>
-          </div>
-        ) : null}
-
-        <div className="absolute right-4 top-4 z-10 grid gap-2 sm:right-5 sm:top-5">
-          <ViewerControlButton label="Scale product up" onClick={() => handleModelScaleChange(0.12)}>
-            <Plus size={18} />
-          </ViewerControlButton>
-          <ViewerControlButton label="Scale product down" onClick={() => handleModelScaleChange(-0.12)}>
-            <Minus size={18} />
-          </ViewerControlButton>
-          <ViewerControlButton label={autoRotate ? "Pause product rotation" : "Start product rotation"} active={autoRotate} onClick={() => setAutoRotate((value) => !value)}>
-            <RotateCw size={18} />
-          </ViewerControlButton>
-        </div>
       </div>
 
-      <div className="m-3 grid gap-3 rounded-md border border-white/80 bg-white/92 p-3 shadow-panel backdrop-blur sm:m-5 sm:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] sm:items-end">
+      {modelSource === "loading" ? (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center" role="status" aria-label="Loading 3D product">
+          <span className="h-9 w-9 animate-spin rounded-full border-2 border-white/80 border-t-pine shadow-panel" />
+        </div>
+      ) : null}
+
+      {modelSource === "unavailable" ? (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center">
+          <span className="rounded-md border border-white/70 bg-white/88 px-4 py-3 text-xs font-semibold text-graphite shadow-panel backdrop-blur">
+            3D model unavailable
+          </span>
+        </div>
+      ) : null}
+
+      <div className="pointer-events-none absolute left-3 right-20 top-3 min-w-0 text-ink sm:left-5 sm:right-24 sm:top-5">
+        <h3 className="mt-2 break-words text-xl font-semibold leading-tight sm:mt-3 sm:text-3xl">{product.name}</h3>
+        <p className="mt-2 max-w-md text-xs font-medium text-graphite sm:text-sm">{product.category}</p>
+      </div>
+
+      <div className="absolute right-3 top-3 grid gap-2 sm:right-5 sm:top-5">
+        <IconButton label="Scale product up" onClick={() => handleModelScaleChange(0.12)}>
+          <Plus size={17} />
+        </IconButton>
+        <IconButton label="Scale product down" onClick={() => handleModelScaleChange(-0.12)}>
+          <Minus size={17} />
+        </IconButton>
+        <IconButton label="Toggle product rotation" active={autoRotate} onClick={() => setAutoRotate((value) => !value)}>
+          <RotateCw size={17} />
+        </IconButton>
+      </div>
+
+      <div className="absolute inset-x-3 bottom-3 grid gap-3 rounded-md border border-white/70 bg-white/88 p-3 shadow-panel backdrop-blur sm:inset-x-5 sm:bottom-5 md:grid-cols-[1fr_auto] md:items-end">
         <div className="min-w-0">
           <div className="text-xs font-semibold uppercase text-graphite">Colorway</div>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -326,7 +311,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
                 title={option.label}
                 onClick={() => handleColorwayChange(index)}
                 className={[
-                  "grid h-9 w-9 place-items-center rounded-md border bg-white transition",
+                  "grid h-9 w-9 place-items-center rounded-md border transition",
                   index === colorwayIndex ? "border-pine ring-2 ring-pine/20" : "border-slate-200 hover:border-pine"
                 ].join(" ")}
               >
@@ -343,14 +328,14 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
 
         <div className="min-w-0">
           <div className="text-xs font-semibold uppercase text-graphite">Surface</div>
-          <div className="mt-2 grid grid-cols-1 gap-2 min-[430px]:grid-cols-3">
+          <div className="mt-2 grid grid-cols-3 gap-2">
             {surfaceModes.map((mode) => (
               <button
                 key={mode.value}
                 type="button"
                 onClick={() => handleSurfaceModeChange(mode.value)}
                 className={[
-                  "min-h-9 rounded-md border px-3 text-xs font-semibold transition sm:text-sm",
+                  "min-h-9 rounded-md border px-3 text-xs font-semibold transition",
                   surfaceMode === mode.value ? "border-pine bg-pine text-white" : "border-slate-200 bg-white text-ink hover:border-pine"
                 ].join(" ")}
               >
@@ -364,41 +349,17 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
   );
 }
 
-function ViewerControlButton({
-  active,
-  children,
-  label,
-  onClick
-}: {
-  active?: boolean;
-  children: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className={[
-        "grid h-11 w-11 place-items-center rounded-md border text-ink shadow-sm transition",
-        active ? "border-pine bg-pine text-white" : "border-white/80 bg-white/95 hover:border-pine"
-      ].join(" ")}
-    >
-      {children}
-    </button>
-  );
-}
-
-async function loadUploadedProductModel(product: Product, surfaceMode: SurfaceMode): Promise<THREE.Group | undefined> {
+async function loadUploadedProductModel(
+  product: Product,
+  colorway: (typeof colorways)[number],
+  surfaceMode: SurfaceMode
+): Promise<THREE.Group | undefined> {
   const modelUrl = await resolveProductModelUrl(product);
   if (!modelUrl) return undefined;
 
   const loader = new GLTFLoader();
   const gltf = await loader.loadAsync(modelUrl);
-  return prepareUploadedProductModel(gltf.scene, surfaceMode);
+  return prepareUploadedProductModel(gltf.scene, colorway, surfaceMode);
 }
 
 async function resolveProductModelUrl(product: Product): Promise<string | undefined> {
@@ -426,7 +387,11 @@ async function checkModelUrl(modelUrl: string) {
   }
 }
 
-function prepareUploadedProductModel(model: THREE.Object3D, surfaceMode: SurfaceMode) {
+function prepareUploadedProductModel(
+  model: THREE.Object3D,
+  colorway: (typeof colorways)[number],
+  surfaceMode: SurfaceMode
+) {
   const group = new THREE.Group();
   model.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return;
@@ -447,22 +412,6 @@ function prepareUploadedProductModel(model: THREE.Object3D, surfaceMode: Surface
   return group;
 }
 
-function updateUploadedModelSurface(model: THREE.Object3D, surfaceMode: SurfaceMode) {
-  model.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    const materials = Array.isArray(child.material) ? child.material : [child.material];
-
-    materials.forEach((material) => {
-      if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
-        const finish = makeMaterial("#ffffff", surfaceMode);
-        material.roughness = finish.roughness;
-        material.metalness = Math.max(material.metalness, finish.metalness);
-        material.needsUpdate = true;
-      }
-    });
-  });
-}
-
 function fitModelToWrapperHeight(
   model: THREE.Object3D,
   camera: THREE.PerspectiveCamera,
@@ -479,13 +428,15 @@ function fitModelToWrapperHeight(
   const targetHeight = viewport.height * targetRatio;
   camera.updateMatrixWorld(true);
 
-  model.scale.setScalar(1);
-  model.updateMatrixWorld(true);
-  const baseBounds = measureProjectedBounds(model, camera, viewport);
-  if (!baseBounds || baseBounds.height < 1) return;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    model.updateMatrixWorld(true);
+    const projectedBounds = measureProjectedBounds(model, camera, viewport);
+    if (!projectedBounds || projectedBounds.height < 1) return;
 
-  const nextScale = clamp(targetHeight / baseBounds.height, 0.02, 50);
-  model.scale.setScalar(nextScale);
+    const scaleFactor = clamp(targetHeight / projectedBounds.height, 0.02, 50);
+    if (Math.abs(1 - scaleFactor) < 0.01) return;
+    model.scale.multiplyScalar(scaleFactor);
+  }
 
   model.updateMatrixWorld(true);
 }
