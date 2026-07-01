@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Minus, Palette, Plus, RotateCw } from "lucide-react";
+import { Minus, Plus, RotateCw } from "lucide-react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Product } from "../../shared/types";
@@ -9,7 +9,7 @@ import { IconButton } from "./IconButton";
 
 type ProductModelKind = "shoe" | "trail_shoe" | "slide" | "jacket" | "apparel" | "vest" | "bag";
 type SurfaceMode = "matte" | "weather" | "reflective";
-type ModelSource = "loading" | "uploaded" | "generated";
+type ModelSource = "loading" | "uploaded" | "unavailable";
 
 interface Product3DViewerProps {
   onAgentActivity: (activity: AgentActivityInput) => void;
@@ -36,8 +36,12 @@ const MODEL_MAX_USER_SCALE = 1.42;
 export function Product3DViewer({ onAgentActivity, product }: Product3DViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const modelLoadIdRef = useRef(0);
+  const modelRef = useRef<THREE.Object3D | null>(null);
   const modelScaleRef = useRef(1);
   const refitSceneRef = useRef<(() => void) | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const autoRotateRef = useRef(true);
   const [colorwayIndex, setColorwayIndex] = useState(0);
   const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>("matte");
   const [modelScale, setModelScale] = useState(1);
@@ -45,6 +49,19 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
   const [modelSource, setModelSource] = useState<ModelSource>("loading");
   const modelKind = useMemo(() => getProductModelKind(product), [product]);
   const colorway = colorways[colorwayIndex];
+
+  function removeActiveProductModel(scene: THREE.Scene) {
+    const activeModel = modelRef.current;
+    if (!activeModel) return;
+
+    scene.remove(activeModel);
+    disposeObject(activeModel);
+    modelRef.current = null;
+  }
+
+  useEffect(() => {
+    autoRotateRef.current = autoRotate;
+  }, [autoRotate]);
 
   useEffect(() => {
     onAgentActivity({
@@ -78,6 +95,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
 
     const scene = new THREE.Scene();
     scene.fog = new THREE.Fog("#eef3f8", 7, 12);
+    sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
     camera.position.set(3.2, 2.1, 6.2);
@@ -105,11 +123,8 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     ground.receiveShadow = true;
     scene.add(ground);
 
-    let isMounted = true;
-    let productModel: THREE.Object3D | null = null;
-    setModelSource("loading");
-
     const fitProductModel = (viewport = readStageViewport(stage)) => {
+      const productModel = modelRef.current;
       if (!productModel) return;
       fitModelToWrapperHeight(productModel, camera, viewport, modelScaleRef.current);
     };
@@ -125,27 +140,6 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
 
     const initialViewport = readStageViewport(stage);
     resizeScene(initialViewport.width, initialViewport.height);
-
-    loadUploadedProductModel(product, colorway, surfaceMode)
-      .then((uploadedModel) => {
-        if (!isMounted) {
-          if (uploadedModel) disposeObject(uploadedModel);
-          return;
-        }
-        productModel = uploadedModel ?? createProductModel(product, modelKind, colorway, surfaceMode);
-        productModel.rotation.set(0.05, -0.52, 0);
-        scene.add(productModel);
-        fitProductModel();
-        setModelSource(uploadedModel ? "uploaded" : "generated");
-      })
-      .catch(() => {
-        if (!isMounted) return;
-        productModel = createProductModel(product, modelKind, colorway, surfaceMode);
-        productModel.rotation.set(0.05, -0.52, 0);
-        scene.add(productModel);
-        fitProductModel();
-        setModelSource("generated");
-      });
 
     const resizeObserver = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
@@ -166,6 +160,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     };
 
     const handlePointerMove = (event: PointerEvent) => {
+      const productModel = modelRef.current;
       if (!dragging || !productModel) return;
       const deltaX = event.clientX - lastX;
       const deltaY = event.clientY - lastY;
@@ -186,25 +181,67 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     canvas.addEventListener("pointercancel", handlePointerUp);
 
     const render = () => {
-      if (productModel && autoRotate && !dragging) productModel.rotation.y += 0.0045;
+      const productModel = modelRef.current;
+      if (productModel && autoRotateRef.current && !dragging) productModel.rotation.y += 0.0045;
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(render);
     };
     render();
 
     return () => {
-      isMounted = false;
+      modelLoadIdRef.current += 1;
       refitSceneRef.current = null;
+      sceneRef.current = null;
       window.cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
       canvas.removeEventListener("pointerdown", handlePointerDown);
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("pointerup", handlePointerUp);
       canvas.removeEventListener("pointercancel", handlePointerUp);
+      removeActiveProductModel(scene);
       disposeObject(scene);
       renderer.dispose();
     };
-  }, [autoRotate, colorway, modelKind, product, surfaceMode]);
+  }, []);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    const loadId = modelLoadIdRef.current + 1;
+    modelLoadIdRef.current = loadId;
+    setModelSource("loading");
+    removeActiveProductModel(scene);
+
+    loadUploadedProductModel(product, colorway, surfaceMode)
+      .then((uploadedModel) => {
+        if (modelLoadIdRef.current !== loadId || sceneRef.current !== scene) {
+          if (uploadedModel) disposeObject(uploadedModel);
+          return;
+        }
+
+        if (!uploadedModel) {
+          setModelSource("unavailable");
+          return;
+        }
+
+        uploadedModel.rotation.set(0.05, -0.52, 0);
+        modelRef.current = uploadedModel;
+        scene.add(uploadedModel);
+        refitSceneRef.current?.();
+        setModelSource("uploaded");
+      })
+      .catch(() => {
+        if (modelLoadIdRef.current === loadId && sceneRef.current === scene) {
+          setModelSource("unavailable");
+        }
+      });
+
+    return () => {
+      modelLoadIdRef.current += 1;
+      removeActiveProductModel(scene);
+    };
+  }, [colorway, product.id, product.modelUrl, surfaceMode]);
 
   function handleModelScaleChange(delta: number) {
     setModelScale((current) => {
@@ -232,16 +269,20 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
       </div>
 
       {modelSource === "loading" ? (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+        <div className="pointer-events-none absolute inset-0 grid place-items-center" role="status" aria-label="Loading 3D product">
           <span className="h-9 w-9 animate-spin rounded-full border-2 border-white/80 border-t-pine shadow-panel" />
         </div>
       ) : null}
 
+      {modelSource === "unavailable" ? (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center">
+          <span className="rounded-md border border-white/70 bg-white/88 px-4 py-3 text-xs font-semibold text-graphite shadow-panel backdrop-blur">
+            3D model unavailable
+          </span>
+        </div>
+      ) : null}
+
       <div className="pointer-events-none absolute left-4 top-4 max-w-[72%] text-ink sm:left-5 sm:top-5">
-        {/* <div className="inline-flex items-center gap-2 rounded bg-white/86 px-3 py-2 text-xs font-semibold shadow-panel backdrop-blur">
-          <Palette size={14} className="text-iris" />
-          {modelSource === "uploaded" ? "Product 3D asset" : "Interactive 3D fit view"}
-        </div> */}
         <h3 className="mt-3 text-2xl font-semibold leading-tight sm:text-3xl">{product.name}</h3>
         <p className="mt-2 max-w-md text-xs font-medium text-graphite sm:text-sm">{product.category}</p>
       </div>
@@ -508,113 +549,6 @@ function getProductModelKind(product: Product): ProductModelKind {
   return "apparel";
 }
 
-function createProductModel(
-  product: Product,
-  kind: ProductModelKind,
-  colorway: (typeof colorways)[number],
-  surfaceMode: SurfaceMode
-) {
-  const group = new THREE.Group();
-  const material = makeMaterial(colorway.primary, surfaceMode);
-  const secondaryMaterial = makeMaterial(colorway.secondary, surfaceMode);
-  const accentMaterial = makeMaterial(colorway.accent, surfaceMode, true);
-  const soleMaterial = makeMaterial(colorway.sole, "matte");
-
-  if (kind === "shoe" || kind === "trail_shoe" || kind === "slide") {
-    buildShoe(group, kind, material, secondaryMaterial, accentMaterial, soleMaterial);
-  } else if (kind === "jacket") {
-    buildJacket(group, material, secondaryMaterial, accentMaterial);
-  } else if (kind === "vest") {
-    buildVest(group, material, secondaryMaterial, accentMaterial);
-  } else if (kind === "bag") {
-    buildBag(group, material, secondaryMaterial, accentMaterial, soleMaterial);
-  } else {
-    buildApparel(group, product, material, secondaryMaterial, accentMaterial);
-  }
-
-  return group;
-}
-
-function buildShoe(
-  group: THREE.Group,
-  kind: ProductModelKind,
-  material: THREE.Material,
-  secondaryMaterial: THREE.Material,
-  accentMaterial: THREE.Material,
-  soleMaterial: THREE.Material
-) {
-  addBox(group, soleMaterial, [0, -0.62, 0], [3.35, 0.34, 1.05]);
-  addSphere(group, material, [-0.2, -0.25, 0], [1.45, 0.46, 0.62]);
-  addSphere(group, secondaryMaterial, [0.92, -0.35, 0], [0.75, 0.32, 0.58]);
-  addBox(group, material, [-1.32, -0.18, 0], [0.7, kind === "trail_shoe" ? 0.88 : 0.62, 0.88]);
-  addBox(group, accentMaterial, [-0.12, 0.02, 0.02], [1.1, 0.05, 0.82], [0, 0, -0.08]);
-
-  for (let index = 0; index < 5; index += 1) {
-    addBox(group, secondaryMaterial, [-0.58 + index * 0.27, 0.12, 0.02], [0.04, 0.08, 0.86], [0, 0, 0.4]);
-  }
-
-  const treadCount = kind === "trail_shoe" ? 9 : 6;
-  for (let index = 0; index < treadCount; index += 1) {
-    addBox(group, soleMaterial, [-1.36 + index * 0.36, -0.86, 0.45], [0.18, 0.1, 0.2]);
-    addBox(group, soleMaterial, [-1.36 + index * 0.36, -0.86, -0.45], [0.18, 0.1, 0.2]);
-  }
-
-  if (kind === "slide") {
-    addBox(group, material, [-0.08, -0.1, 0], [1.55, 0.24, 1.15], [0, 0, -0.12]);
-  }
-
-  if (kind === "trail_shoe") {
-    addBox(group, accentMaterial, [-1.44, 0.4, 0], [0.62, 0.48, 0.74]);
-  }
-}
-
-function buildJacket(group: THREE.Group, material: THREE.Material, secondaryMaterial: THREE.Material, accentMaterial: THREE.Material) {
-  addBox(group, material, [0, -0.12, 0], [1.72, 2.26, 0.46]);
-  addBox(group, secondaryMaterial, [-1.12, -0.22, 0], [0.48, 1.7, 0.4], [0, 0, -0.2]);
-  addBox(group, secondaryMaterial, [1.12, -0.22, 0], [0.48, 1.7, 0.4], [0, 0, 0.2]);
-  addSphere(group, material, [0, 1.18, -0.1], [0.78, 0.42, 0.38]);
-  addBox(group, accentMaterial, [0, -0.08, 0.26], [0.06, 1.96, 0.04]);
-  addBox(group, accentMaterial, [-0.48, -0.48, 0.28], [0.5, 0.04, 0.04], [0, 0, -0.22]);
-  addBox(group, accentMaterial, [0.48, -0.48, 0.28], [0.5, 0.04, 0.04], [0, 0, 0.22]);
-}
-
-function buildVest(group: THREE.Group, material: THREE.Material, secondaryMaterial: THREE.Material, accentMaterial: THREE.Material) {
-  addBox(group, material, [-0.48, -0.06, 0], [0.76, 1.82, 0.36], [0, 0, 0.04]);
-  addBox(group, material, [0.48, -0.06, 0], [0.76, 1.82, 0.36], [0, 0, -0.04]);
-  addBox(group, accentMaterial, [0, -0.06, 0.24], [0.07, 1.62, 0.05]);
-  addCylinder(group, secondaryMaterial, [-0.58, -0.24, 0.38], [0.18, 0.18, 0.82], [Math.PI / 2, 0, 0]);
-  addCylinder(group, secondaryMaterial, [0.58, -0.24, 0.38], [0.18, 0.18, 0.82], [Math.PI / 2, 0, 0]);
-  addBox(group, accentMaterial, [0, 0.8, 0.26], [1.2, 0.08, 0.05]);
-}
-
-function buildBag(
-  group: THREE.Group,
-  material: THREE.Material,
-  secondaryMaterial: THREE.Material,
-  accentMaterial: THREE.Material,
-  trimMaterial: THREE.Material
-) {
-  addBox(group, material, [0, -0.24, 0], [2.2, 1.38, 1.05]);
-  addBox(group, secondaryMaterial, [0, 0.52, 0.04], [2.02, 0.16, 1.08]);
-  addBox(group, trimMaterial, [-1.18, -0.22, 0.04], [0.08, 1.32, 1.12]);
-  addBox(group, trimMaterial, [1.18, -0.22, 0.04], [0.08, 1.32, 1.12]);
-  addTorus(group, accentMaterial, [-0.56, 0.72, 0], [0.42, 0.18, 0.42], [Math.PI / 2, 0, 0]);
-  addTorus(group, accentMaterial, [0.56, 0.72, 0], [0.42, 0.18, 0.42], [Math.PI / 2, 0, 0]);
-}
-
-function buildApparel(group: THREE.Group, product: Product, material: THREE.Material, secondaryMaterial: THREE.Material, accentMaterial: THREE.Material) {
-  const isHoodie = `${product.name} ${product.tags.join(" ")}`.toLowerCase().includes("hoodie");
-  addBox(group, material, [0, -0.1, 0], [1.55, 2.1, 0.4]);
-  addBox(group, secondaryMaterial, [-1.02, -0.22, 0], [0.42, 1.42, 0.36], [0, 0, -0.28]);
-  addBox(group, secondaryMaterial, [1.02, -0.22, 0], [0.42, 1.42, 0.36], [0, 0, 0.28]);
-  addBox(group, accentMaterial, [0, 0.58, 0.24], [0.58, 0.08, 0.05]);
-
-  if (isHoodie) {
-    addSphere(group, material, [0, 1.1, -0.08], [0.62, 0.36, 0.34]);
-    addBox(group, accentMaterial, [0, -0.58, 0.25], [0.76, 0.4, 0.05]);
-  }
-}
-
 function makeMaterial(color: string, surfaceMode: SurfaceMode, accent = false) {
   const surface = {
     matte: { roughness: 0.78, metalness: 0.05 },
@@ -627,68 +561,6 @@ function makeMaterial(color: string, surfaceMode: SurfaceMode, accent = false) {
     metalness: accent ? Math.min(surface.metalness + 0.12, 0.55) : surface.metalness,
     roughness: accent ? Math.max(surface.roughness - 0.14, 0.12) : surface.roughness
   });
-}
-
-function addBox(
-  group: THREE.Group,
-  material: THREE.Material,
-  position: [number, number, number],
-  scale: [number, number, number],
-  rotation: [number, number, number] = [0, 0, 0]
-) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material);
-  mesh.position.set(...position);
-  mesh.scale.set(...scale);
-  mesh.rotation.set(...rotation);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
-}
-
-function addSphere(
-  group: THREE.Group,
-  material: THREE.Material,
-  position: [number, number, number],
-  scale: [number, number, number]
-) {
-  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.72, 36, 18), material);
-  mesh.position.set(...position);
-  mesh.scale.set(...scale);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
-}
-
-function addCylinder(
-  group: THREE.Group,
-  material: THREE.Material,
-  position: [number, number, number],
-  scale: [number, number, number],
-  rotation: [number, number, number] = [0, 0, 0]
-) {
-  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 32), material);
-  mesh.position.set(...position);
-  mesh.scale.set(...scale);
-  mesh.rotation.set(...rotation);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
-}
-
-function addTorus(
-  group: THREE.Group,
-  material: THREE.Material,
-  position: [number, number, number],
-  scale: [number, number, number],
-  rotation: [number, number, number] = [0, 0, 0]
-) {
-  const mesh = new THREE.Mesh(new THREE.TorusGeometry(1, 0.08, 18, 64), material);
-  mesh.position.set(...position);
-  mesh.scale.set(...scale);
-  mesh.rotation.set(...rotation);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  group.add(mesh);
 }
 
 function disposeObject(object: THREE.Object3D) {
