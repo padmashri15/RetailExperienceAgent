@@ -9,6 +9,7 @@ import { IconButton } from "./IconButton";
 
 type ProductModelKind = "shoe" | "trail_shoe" | "slide" | "jacket" | "apparel" | "vest" | "bag";
 type SurfaceMode = "matte" | "weather" | "reflective";
+type ModelSource = "loading" | "uploaded" | "generated";
 
 interface Product3DViewerProps {
   onAgentActivity: (activity: AgentActivityInput) => void;
@@ -28,38 +29,22 @@ const surfaceModes: Array<{ label: string; value: SurfaceMode }> = [
   { label: "Reflective", value: "reflective" }
 ];
 
-const MODEL_VIEWPORT_HEIGHT_RATIO = 0.9;
+const MODEL_VIEWPORT_HEIGHT_RATIO = 0.735;
 const MODEL_MIN_USER_SCALE = 0.72;
 const MODEL_MAX_USER_SCALE = 1.42;
-const MODEL_SAFE_AREA = {
-  bottom: 158,
-  top: 104
-};
 
 export function Product3DViewer({ onAgentActivity, product }: Product3DViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const autoRotateRef = useRef(true);
   const modelScaleRef = useRef(1);
-  const productModelRef = useRef<THREE.Group | undefined>(undefined);
   const refitSceneRef = useRef<(() => void) | null>(null);
   const [colorwayIndex, setColorwayIndex] = useState(0);
   const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>("matte");
   const [modelScale, setModelScale] = useState(1);
   const [autoRotate, setAutoRotate] = useState(true);
-  const [isModelReady, setIsModelReady] = useState(false);
-  const [modelLoadFailed, setModelLoadFailed] = useState(false);
+  const [modelSource, setModelSource] = useState<ModelSource>("loading");
   const modelKind = useMemo(() => getProductModelKind(product), [product]);
   const colorway = colorways[colorwayIndex];
-
-  useEffect(() => {
-    autoRotateRef.current = autoRotate;
-  }, [autoRotate]);
-
-  useEffect(() => {
-    if (!productModelRef.current) return;
-    updateUploadedModelSurface(productModelRef.current, surfaceMode);
-  }, [surfaceMode]);
 
   useEffect(() => {
     onAgentActivity({
@@ -121,10 +106,8 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     scene.add(ground);
 
     let isMounted = true;
-    let productModel: THREE.Group | undefined;
-    productModelRef.current = undefined;
-    setIsModelReady(false);
-    setModelLoadFailed(false);
+    let productModel: THREE.Object3D | null = null;
+    setModelSource("loading");
 
     const fitProductModel = (viewport = readStageViewport(stage)) => {
       if (!productModel) return;
@@ -145,16 +128,23 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
 
     loadUploadedProductModel(product, colorway, surfaceMode)
       .then((uploadedModel) => {
-        if (!uploadedModel || !isMounted) return;
-        uploadedModel.rotation.set(0.05, -0.52, 0);
-        productModel = uploadedModel;
-        productModelRef.current = uploadedModel;
+        if (!isMounted) {
+          if (uploadedModel) disposeObject(uploadedModel);
+          return;
+        }
+        productModel = uploadedModel ?? createProductModel(product, modelKind, colorway, surfaceMode);
+        productModel.rotation.set(0.05, -0.52, 0);
         scene.add(productModel);
         fitProductModel();
-        setIsModelReady(true);
+        setModelSource(uploadedModel ? "uploaded" : "generated");
       })
       .catch(() => {
-        if (isMounted) setModelLoadFailed(true);
+        if (!isMounted) return;
+        productModel = createProductModel(product, modelKind, colorway, surfaceMode);
+        productModel.rotation.set(0.05, -0.52, 0);
+        scene.add(productModel);
+        fitProductModel();
+        setModelSource("generated");
       });
 
     const resizeObserver = new ResizeObserver(([entry]) => {
@@ -196,7 +186,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     canvas.addEventListener("pointercancel", handlePointerUp);
 
     const render = () => {
-      if (productModel && autoRotateRef.current && !dragging) productModel.rotation.y += 0.0045;
+      if (productModel && autoRotate && !dragging) productModel.rotation.y += 0.0045;
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(render);
     };
@@ -204,7 +194,6 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
 
     return () => {
       isMounted = false;
-      productModelRef.current = undefined;
       refitSceneRef.current = null;
       window.cancelAnimationFrame(frameId);
       resizeObserver.disconnect();
@@ -215,7 +204,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
       disposeObject(scene);
       renderer.dispose();
     };
-  }, [modelKind, product.id, product.modelUrl]);
+  }, [autoRotate, colorway, modelKind, product, surfaceMode]);
 
   function handleModelScaleChange(delta: number) {
     setModelScale((current) => {
@@ -242,21 +231,19 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
         <canvas ref={canvasRef} className="block h-full w-full cursor-grab touch-none active:cursor-grabbing" />
       </div>
 
-      {!isModelReady ? (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center">
-          <div className="rounded-md border border-white/70 bg-white/86 px-4 py-3 text-xs font-semibold text-graphite shadow-panel backdrop-blur">
-            {modelLoadFailed ? "3D asset unavailable" : "Loading 3D asset"}
-          </div>
+      {modelSource === "loading" ? (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+          <span className="h-9 w-9 animate-spin rounded-full border-2 border-white/80 border-t-pine shadow-panel" />
         </div>
       ) : null}
 
-      <div className="pointer-events-none absolute inset-x-4 top-4 rounded-md border border-white/70 bg-white/82 p-3 pr-16 text-ink shadow-sm backdrop-blur sm:inset-x-5 sm:top-5 sm:pr-20">
+      <div className="pointer-events-none absolute left-4 top-4 max-w-[72%] text-ink sm:left-5 sm:top-5">
         {/* <div className="inline-flex items-center gap-2 rounded bg-white/86 px-3 py-2 text-xs font-semibold shadow-panel backdrop-blur">
           <Palette size={14} className="text-iris" />
           {modelSource === "uploaded" ? "Product 3D asset" : "Interactive 3D fit view"}
         </div> */}
-        <h3 className="max-w-full break-words text-lg font-semibold leading-snug sm:text-xl">{product.name}</h3>
-        <p className="mt-1 max-w-full truncate text-xs font-medium text-graphite sm:text-sm">{product.category}</p>
+        <h3 className="mt-3 text-2xl font-semibold leading-tight sm:text-3xl">{product.name}</h3>
+        <p className="mt-2 max-w-md text-xs font-medium text-graphite sm:text-sm">{product.category}</p>
       </div>
 
       <div className="absolute right-4 top-4 grid gap-2 sm:right-5 sm:top-5">
@@ -384,22 +371,6 @@ function prepareUploadedProductModel(
   return group;
 }
 
-function updateUploadedModelSurface(model: THREE.Object3D, surfaceMode: SurfaceMode) {
-  model.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return;
-    const materials = Array.isArray(child.material) ? child.material : [child.material];
-
-    materials.forEach((material) => {
-      if (material instanceof THREE.MeshStandardMaterial || material instanceof THREE.MeshPhysicalMaterial) {
-        const finish = makeMaterial("#ffffff", surfaceMode);
-        material.roughness = finish.roughness;
-        material.metalness = Math.max(material.metalness, finish.metalness);
-        material.needsUpdate = true;
-      }
-    });
-  });
-}
-
 function fitModelToWrapperHeight(
   model: THREE.Object3D,
   camera: THREE.PerspectiveCamera,
@@ -413,13 +384,10 @@ function fitModelToWrapperHeight(
     MODEL_VIEWPORT_HEIGHT_RATIO * MODEL_MIN_USER_SCALE,
     MODEL_VIEWPORT_HEIGHT_RATIO * MODEL_MAX_USER_SCALE
   );
-  const safeTop = Math.min(MODEL_SAFE_AREA.top, viewport.height * 0.24);
-  const safeBottom = Math.min(MODEL_SAFE_AREA.bottom, viewport.height * 0.34);
-  const safeHeight = Math.max(viewport.height - safeTop - safeBottom, viewport.height * 0.38);
-  const targetHeight = safeHeight * targetRatio;
+  const targetHeight = viewport.height * targetRatio;
   camera.updateMatrixWorld(true);
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     model.updateMatrixWorld(true);
     const projectedBounds = measureProjectedBounds(model, camera, viewport);
     if (!projectedBounds || projectedBounds.height < 1) return;
@@ -430,32 +398,6 @@ function fitModelToWrapperHeight(
   }
 
   model.updateMatrixWorld(true);
-  alignModelToSafeArea(model, camera, viewport, safeTop, safeBottom);
-}
-
-function alignModelToSafeArea(
-  model: THREE.Object3D,
-  camera: THREE.PerspectiveCamera,
-  viewport: { width: number; height: number },
-  safeTop: number,
-  safeBottom: number
-) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    model.updateMatrixWorld(true);
-    const projectedBounds = measureProjectedBounds(model, camera, viewport);
-    if (!projectedBounds) return;
-
-    const targetCenterY = safeTop + (viewport.height - safeTop - safeBottom) / 2;
-    const currentCenterY = projectedBounds.y + projectedBounds.height / 2;
-    const deltaPixels = targetCenterY - currentCenterY;
-    if (Math.abs(deltaPixels) < 2) return;
-
-    const modelPosition = new THREE.Vector3();
-    model.getWorldPosition(modelPosition);
-    const distance = Math.max(camera.position.distanceTo(modelPosition), 0.1);
-    const visibleHeight = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * distance;
-    model.position.y += -(deltaPixels / viewport.height) * visibleHeight * 0.72;
-  }
 }
 
 function measureProjectedBounds(
@@ -498,7 +440,6 @@ function measureProjectedBounds(
 
   return {
     height: Math.max(maxY - minY, 0),
-    y: minY,
     width: Math.max(maxX - minX, 0)
   };
 }
