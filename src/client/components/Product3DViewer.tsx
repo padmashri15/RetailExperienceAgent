@@ -28,7 +28,7 @@ const surfaceModes: Array<{ label: string; value: SurfaceMode }> = [
   { label: "Reflective", value: "reflective" }
 ];
 
-const MODEL_VIEWPORT_HEIGHT_RATIO = 0.86;
+const MODEL_VIEWPORT_HEIGHT_RATIO = 0.82;
 const MODEL_MIN_USER_SCALE = 0.72;
 const MODEL_MAX_USER_SCALE = 1.42;
 
@@ -44,7 +44,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
   const [colorwayIndex, setColorwayIndex] = useState(0);
   const [surfaceMode, setSurfaceMode] = useState<SurfaceMode>("matte");
   const [modelScale, setModelScale] = useState(1);
-  const [autoRotate, setAutoRotate] = useState(true);
+  const [autoRotate, setAutoRotate] = useState(false);
   const [modelSource, setModelSource] = useState<ModelSource>("loading");
   const modelKind = useMemo(() => getProductModelKind(product), [product]);
   const colorway = colorways[colorwayIndex];
@@ -150,6 +150,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
+    const clock = new THREE.Clock();
 
     const handlePointerDown = (event: PointerEvent) => {
       event.preventDefault();
@@ -185,7 +186,8 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
 
     const render = () => {
       const productModel = modelRef.current;
-      if (productModel && autoRotateRef.current && !dragging) productModel.rotation.y += 0.0045;
+      const deltaSeconds = Math.min(clock.getDelta(), 0.05);
+      if (productModel && autoRotateRef.current && !dragging) productModel.rotation.y += deltaSeconds * 0.75;
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(render);
     };
@@ -258,7 +260,7 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
     setModelScale((current) => {
       const next = clamp(current + delta, MODEL_MIN_USER_SCALE, MODEL_MAX_USER_SCALE);
       modelScaleRef.current = next;
-      window.requestAnimationFrame(() => refitSceneRef.current?.());
+      refitSceneRef.current?.();
       return next;
     });
   }
@@ -274,45 +276,45 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
   }
 
   return (
-    <div className="relative min-h-[540px] overflow-hidden bg-[radial-gradient(circle_at_30%_18%,rgba(255,255,255,0.96),rgba(232,239,246,0.92)_38%,rgba(206,218,230,0.95))] sm:min-h-[560px]">
-      <div ref={stageRef} className="absolute inset-x-0 bottom-[210px] top-[118px] sm:bottom-[142px]">
-        <canvas ref={canvasRef} className="block h-full w-full cursor-grab touch-none active:cursor-grabbing" />
-      </div>
-
-      {modelSource === "loading" ? (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center" role="status" aria-label="Loading 3D product">
-          <span className="h-9 w-9 animate-spin rounded-full border-2 border-white/80 border-t-pine shadow-panel" />
-        </div>
-      ) : null}
-
-      {modelSource === "unavailable" ? (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center">
-          <span className="rounded-md border border-white/70 bg-white/88 px-4 py-3 text-xs font-semibold text-graphite shadow-panel backdrop-blur">
-            3D model unavailable
-          </span>
-        </div>
-      ) : null}
-
-      <div className="pointer-events-none absolute left-4 right-20 top-4 z-20 min-w-0 text-ink sm:left-5 sm:right-24 sm:top-5">
-        <h3 className="line-clamp-2 max-w-[34rem] break-words text-xl font-semibold leading-tight sm:text-2xl">
+    <div className="grid min-h-[560px] grid-rows-[auto_minmax(300px,1fr)_auto] overflow-hidden bg-[radial-gradient(circle_at_30%_18%,rgba(255,255,255,0.96),rgba(232,239,246,0.92)_38%,rgba(206,218,230,0.95))] sm:min-h-[590px]">
+      <div className="grid gap-1 px-4 pb-2 pt-4 text-ink sm:px-5 sm:pt-5">
+        <h3 className="line-clamp-2 max-w-[42rem] break-words text-xl font-semibold leading-tight sm:text-2xl">
           {product.name}
         </h3>
-        <p className="mt-1 max-w-md truncate text-xs font-medium text-graphite sm:text-sm">{product.category}</p>
+        <p className="max-w-md truncate text-xs font-medium text-graphite sm:text-sm">{product.category}</p>
       </div>
 
-      <div className="absolute right-4 top-4 z-30 grid gap-2 sm:right-5 sm:top-5">
-        <ViewerControlButton label="Scale product up" onClick={() => handleModelScaleChange(0.12)}>
-          <Plus size={18} />
-        </ViewerControlButton>
-        <ViewerControlButton label="Scale product down" onClick={() => handleModelScaleChange(-0.12)}>
-          <Minus size={18} />
-        </ViewerControlButton>
-        <ViewerControlButton label={autoRotate ? "Pause product rotation" : "Start product rotation"} active={autoRotate} onClick={() => setAutoRotate((value) => !value)}>
-          <RotateCw size={18} />
-        </ViewerControlButton>
+      <div ref={stageRef} className="relative min-h-[300px] overflow-hidden">
+        <canvas ref={canvasRef} className="block h-full w-full cursor-grab touch-none active:cursor-grabbing" />
+
+        {modelSource === "loading" ? (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center" role="status" aria-label="Loading 3D product">
+            <span className="h-9 w-9 animate-spin rounded-full border-2 border-white/80 border-t-pine shadow-panel" />
+          </div>
+        ) : null}
+
+        {modelSource === "unavailable" ? (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center">
+            <span className="rounded-md border border-white/70 bg-white/88 px-4 py-3 text-xs font-semibold text-graphite shadow-panel backdrop-blur">
+              3D model unavailable
+            </span>
+          </div>
+        ) : null}
+
+        <div className="absolute right-4 top-4 z-10 grid gap-2 sm:right-5 sm:top-5">
+          <ViewerControlButton label="Scale product up" onClick={() => handleModelScaleChange(0.12)}>
+            <Plus size={18} />
+          </ViewerControlButton>
+          <ViewerControlButton label="Scale product down" onClick={() => handleModelScaleChange(-0.12)}>
+            <Minus size={18} />
+          </ViewerControlButton>
+          <ViewerControlButton label={autoRotate ? "Pause product rotation" : "Start product rotation"} active={autoRotate} onClick={() => setAutoRotate((value) => !value)}>
+            <RotateCw size={18} />
+          </ViewerControlButton>
+        </div>
       </div>
 
-      <div className="absolute inset-x-3 bottom-3 z-20 grid gap-3 rounded-md border border-white/80 bg-white/92 p-3 shadow-panel backdrop-blur sm:inset-x-5 sm:bottom-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+      <div className="m-3 grid gap-3 rounded-md border border-white/80 bg-white/92 p-3 shadow-panel backdrop-blur sm:m-5 sm:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] sm:items-end">
         <div className="min-w-0">
           <div className="text-xs font-semibold uppercase text-graphite">Colorway</div>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -339,9 +341,9 @@ export function Product3DViewer({ onAgentActivity, product }: Product3DViewerPro
           </div>
         </div>
 
-        <div className="min-w-0 sm:min-w-[340px]">
+        <div className="min-w-0">
           <div className="text-xs font-semibold uppercase text-graphite">Surface</div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
+          <div className="mt-2 grid grid-cols-1 gap-2 min-[430px]:grid-cols-3">
             {surfaceModes.map((mode) => (
               <button
                 key={mode.value}
@@ -477,15 +479,13 @@ function fitModelToWrapperHeight(
   const targetHeight = viewport.height * targetRatio;
   camera.updateMatrixWorld(true);
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    model.updateMatrixWorld(true);
-    const projectedBounds = measureProjectedBounds(model, camera, viewport);
-    if (!projectedBounds || projectedBounds.height < 1) return;
+  model.scale.setScalar(1);
+  model.updateMatrixWorld(true);
+  const baseBounds = measureProjectedBounds(model, camera, viewport);
+  if (!baseBounds || baseBounds.height < 1) return;
 
-    const scaleFactor = clamp(targetHeight / projectedBounds.height, 0.02, 50);
-    if (Math.abs(1 - scaleFactor) < 0.01) return;
-    model.scale.multiplyScalar(scaleFactor);
-  }
+  const nextScale = clamp(targetHeight / baseBounds.height, 0.02, 50);
+  model.scale.setScalar(nextScale);
 
   model.updateMatrixWorld(true);
 }
